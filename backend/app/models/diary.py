@@ -1,0 +1,38 @@
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+
+class DiaryCreate(BaseModel):
+    """创建日记的请求数据"""
+    content: str = Field(..., min_length=1, max_length=5000, description="日记内容")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "content": "今天同事帮我解决了一个bug,很感激他"
+            }
+        }
+
+class DiaryResponse(BaseModel):
+    """返回给前端的日记数据"""
+    diary_id: str = Field(..., description="日记ID")
+    user_id: str = Field(..., description="用户ID")
+    created_at: str = Field(..., description="创建时间")
+    date: str = Field(..., description="日期(YYYY-MM-DD)")
+    
+    original_content: str = Field(..., description="原始内容")
+    polished_content: str = Field(..., description="润色后内容")
+    ai_feedback: str = Field(..., description="AI反馈")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "diary_id": "123e4567-e89b-12d3-a456-426614174000",
+                "user_id": "user_123",
+                "created_at": "2025-10-08T10:30:00Z",
+                "date": "2025-10-08",
+                "original_content": "今天同事帮我解决了一个bug,很感激他",
+                "polished_content": "今天同事帮我解决了一个棘手的bug,我很感激他的帮助。",
+                "ai_feedback": "能遇到愿意伸出援手的同事真的很幸运呢!🙂"
+            }
+        }

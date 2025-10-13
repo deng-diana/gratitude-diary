@@ -1,0 +1,34 @@
+# Python相关
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 环境变量(敏感信息不要打包进去)
+.env
+.env.local
+
+# Git相关
+.git/
+.gitignore
+
+# IDE相关
+.vscode/
+.idea/
+*.swp
+
+# macOS相关
+.DS_Store
+
+# 测试相关
+tests/
+*.md
+README.md
+
+# 临时文件
+*.log
+*.txt
+!requirements.txt
