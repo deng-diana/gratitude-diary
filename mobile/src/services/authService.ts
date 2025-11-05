@@ -27,7 +27,7 @@ export interface User {
   id: string; // 用户唯一ID
   email: string; // 邮箱
   name: string; // 姓名
-  provider: "apple" | "google"; // 登录方式
+  provider: "apple" | "google" | "username"; // 登录方式
   idToken: string; // JWT Token
   accessToken?: string; // Cognito Access Token
   refreshToken?: string; // Cognito Refresh Token
@@ -859,5 +859,586 @@ export function stopAutoRefresh() {
   if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = null;
+  }
+}
+
+/**
+ * 邮箱登录或注册（新接口）
+ *
+ * 流程:
+ * 1. 调用后端 /auth/email/login_or_signup
+ * 2. 根据返回的状态处理：
+ *    - SIGNED_IN: 直接登录成功，保存tokens
+ *    - CONFIRMATION_REQUIRED: 需要验证码确认
+ *    - WRONG_PASSWORD: 密码错误
+ */
+export type EmailLoginResult =
+  | { status: "SIGNED_IN"; user: User }
+  | { status: "CONFIRMATION_REQUIRED"; email: string }
+  | { status: "WRONG_PASSWORD" };
+
+export async function emailLoginOrSignUp(
+  email: string,
+  password: string,
+  name?: string
+): Promise<EmailLoginResult> {
+  try {
+    console.log("📧 开始邮箱登录或注册流程...");
+
+    // 调用后端新接口
+    const response = await fetch(`${API_BASE_URL}/auth/email/login_or_signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: email.trim(),
+        password: password,
+        ...(name && { name: name.trim() }), // 如果提供了姓名，则包含在请求中
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "操作失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `操作失败 (${response.status})`;
+      }
+      console.error("❌ 邮箱登录或注册失败:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorMessage,
+      });
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 邮箱登录或注册响应:", data);
+
+    // 根据状态处理
+    if (data.status === "SIGNED_IN") {
+      // 登录成功，保存tokens
+      const userInfo = parseJWT(data.idToken);
+
+      const user: User = {
+        id: userInfo.sub,
+        email: userInfo.email || email,
+        name:
+          userInfo.name || userInfo.email?.split("@")[0] || email.split("@")[0],
+        provider: "username",
+        idToken: data.idToken,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+      };
+
+      console.log("✅ 登录成功，保存tokens");
+      await saveUser(user);
+
+      return { status: "SIGNED_IN", user };
+    } else if (data.status === "CONFIRMATION_REQUIRED") {
+      // 需要验证码确认
+      console.log("📧 需要验证码确认");
+      return { status: "CONFIRMATION_REQUIRED", email: email.trim() };
+    } else if (data.status === "WRONG_PASSWORD") {
+      // 密码错误
+      console.log("❌ 密码错误");
+      return { status: "WRONG_PASSWORD" };
+    } else {
+      throw new Error(`未知状态: ${data.status}`);
+    }
+  } catch (error: any) {
+    console.error("❌ 邮箱登录或注册失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 邮箱验证码确认并登录
+ *
+ * 流程:
+ * 1. 调用后端 /auth/email/confirm
+ * 2. 获取tokens并保存
+ */
+export async function emailConfirmAndLogin(
+  email: string,
+  code: string,
+  password: string
+): Promise<User> {
+  try {
+    console.log("📧 开始邮箱验证码确认...");
+
+    const response = await fetch(`${API_BASE_URL}/auth/email/confirm`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: email.trim(),
+        code: code.trim(),
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "确认失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `确认失败 (${response.status})`;
+      }
+      console.error("❌ 邮箱确认失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 邮箱确认并登录成功");
+
+    // 解析idToken获取用户信息
+    const userInfo = parseJWT(data.idToken);
+
+    const user: User = {
+      id: userInfo.sub,
+      email: userInfo.email || email,
+      name:
+        userInfo.name || userInfo.email?.split("@")[0] || email.split("@")[0],
+      provider: "username",
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+    };
+
+    console.log("✅ 邮箱确认并登录成功，保存tokens");
+    await saveUser(user);
+
+    return user;
+  } catch (error: any) {
+    console.error("❌ 邮箱确认失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 用户名密码登录（保留旧接口以兼容）
+ *
+ * 流程:
+ * 1. 调用Cognito的SRP认证流程
+ * 2. 获取tokens
+ * 3. 保存token和用户信息
+ */
+export async function signInWithUsernamePassword(
+  username: string,
+  password: string
+): Promise<User> {
+  try {
+    console.log("🚀 开始用户名密码登录流程...");
+
+    const cognitoDomain = awsConfig.oauth.domain;
+    const clientId = awsConfig.userPoolWebClientId;
+    const redirectUri = awsConfig.oauth.redirectSignIn;
+
+    // 验证配置
+    if (!cognitoDomain || !clientId || !redirectUri) {
+      throw new Error("登录配置不完整");
+    }
+
+    // 调用后端API进行用户名密码登录
+    const response = await fetch(`${API_BASE_URL}/auth/username-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: username,
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "登录失败";
+      let errorData = null;
+      try {
+        errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        // 如果无法解析JSON，尝试读取文本
+        try {
+          const text = await response.text();
+          errorMessage = text || `登录失败 (${response.status})`;
+        } catch (textError) {
+          errorMessage = `登录失败 (${response.status})`;
+        }
+      }
+      console.error("❌ 登录失败:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorMessage,
+        errorData,
+      });
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 登录成功，获取到tokens");
+
+    // 解析idToken获取用户信息
+    const userInfo = parseJWT(data.idToken);
+
+    const user: User = {
+      id: userInfo.sub,
+      email: userInfo.email || "",
+      name: userInfo.name || userInfo.email?.split("@")[0] || username,
+      provider: "username",
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+    };
+
+    console.log("✅ 用户名密码登录成功，保存所有tokens");
+
+    // 保存用户信息
+    await saveUser(user);
+
+    return user;
+  } catch (error: any) {
+    console.error("❌ 用户名密码登录失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 注册新用户
+ *
+ * 流程:
+ * 1. 调用后端API注册
+ * 2. 注册成功后自动登录
+ */
+export async function signUp(
+  username: string,
+  email: string,
+  password: string
+): Promise<User> {
+  try {
+    console.log("🚀 开始注册流程...");
+
+    // 调用后端API进行注册
+    const response = await fetch(`${API_BASE_URL}/auth/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: username,
+        email: email,
+        password: password,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "注册失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `注册失败 (${response.status})`;
+      }
+      console.error("❌ 注册失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 注册成功");
+
+    // 解析idToken获取用户信息
+    const userInfo = parseJWT(data.idToken);
+
+    const user: User = {
+      id: userInfo.sub,
+      email: userInfo.email || email,
+      name: userInfo.name || username,
+      provider: "username",
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+    };
+
+    console.log("✅ 注册成功，保存所有tokens");
+
+    // 保存用户信息
+    await saveUser(user);
+
+    return user;
+  } catch (error: any) {
+    console.error("❌ 注册失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 手机号注册（发送验证码）
+ *
+ * 流程:
+ * 1. 调用后端API发送验证码
+ * 2. 返回成功状态
+ */
+export async function signUpWithPhone(
+  phoneNumber: string,
+  name?: string
+): Promise<void> {
+  try {
+    console.log("🚀 开始手机号注册流程...");
+
+    // 验证手机号格式
+    if (!phoneNumber.startsWith("+")) {
+      throw new Error("手机号格式错误，请包含国家代码（如+86）");
+    }
+
+    // 调用后端API发送验证码
+    const response = await fetch(`${API_BASE_URL}/auth/phone/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone_number: phoneNumber,
+        ...(name && { name: name.trim() }), // 如果提供了姓名，则包含在请求中
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "发送验证码失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `发送验证码失败 (${response.status})`;
+      }
+      console.error("❌ 发送验证码失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    console.log("✅ 验证码发送成功");
+  } catch (error: any) {
+    console.error("❌ 手机号注册失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 验证手机验证码并登录（注册流程）
+ *
+ * 流程:
+ * 1. 调用后端API验证验证码
+ * 2. 自动登录并获取tokens
+ */
+export async function verifyPhoneCode(
+  phoneNumber: string,
+  verificationCode: string
+): Promise<User> {
+  try {
+    console.log("🚀 开始验证手机验证码...");
+
+    // 调用后端API验证验证码
+    const response = await fetch(`${API_BASE_URL}/auth/phone/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone_number: phoneNumber,
+        verification_code: verificationCode,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "验证失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `验证失败 (${response.status})`;
+      }
+      console.error("❌ 验证失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 验证成功，获取到tokens");
+
+    // 解析idToken获取用户信息
+    const userInfo = parseJWT(data.idToken);
+
+    const user: User = {
+      id: userInfo.sub,
+      email: userInfo.email || "",
+      name: userInfo.name || phoneNumber,
+      provider: "username",
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+    };
+
+    console.log("✅ 手机号注册并登录成功，保存所有tokens");
+
+    // 保存用户信息
+    await saveUser(user);
+
+    return user;
+  } catch (error: any) {
+    console.error("❌ 验证手机验证码失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 手机号登录（发送验证码）
+ *
+ * 流程:
+ * 1. 调用后端API发送验证码
+ * 2. 返回成功状态
+ */
+export async function loginWithPhone(phoneNumber: string): Promise<void> {
+  try {
+    console.log("🚀 开始手机号登录流程...");
+
+    // 验证手机号格式
+    if (!phoneNumber.startsWith("+")) {
+      throw new Error("手机号格式错误，请包含国家代码（如+86）");
+    }
+
+    // 调用后端API发送验证码
+    const response = await fetch(`${API_BASE_URL}/auth/phone/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone_number: phoneNumber,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "发送验证码失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `发送验证码失败 (${response.status})`;
+      }
+      console.error("❌ 发送验证码失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    console.log("✅ 验证码发送成功");
+  } catch (error: any) {
+    console.error("❌ 手机号登录失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 验证手机验证码并登录（登录流程）
+ *
+ * 流程:
+ * 1. 调用后端API验证验证码并设置密码
+ * 2. 自动登录并获取tokens
+ */
+export async function verifyPhoneLoginCode(
+  phoneNumber: string,
+  verificationCode: string,
+  newPassword: string
+): Promise<User> {
+  try {
+    console.log("🚀 开始验证手机登录验证码...");
+
+    // 验证密码强度
+    if (newPassword.length < 8) {
+      throw new Error("密码至少需要8个字符");
+    }
+
+    // 调用后端API验证验证码并登录
+    const response = await fetch(`${API_BASE_URL}/auth/phone/login/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone_number: phoneNumber,
+        verification_code: verificationCode,
+        new_password: newPassword,
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = "验证失败";
+      try {
+        const errorData = await response.json();
+        errorMessage =
+          errorData.detail ||
+          errorData.error ||
+          errorData.message ||
+          errorMessage;
+      } catch (e) {
+        errorMessage = `验证失败 (${response.status})`;
+      }
+      console.error("❌ 验证失败:", errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log("✅ 验证成功，获取到tokens");
+
+    // 解析idToken获取用户信息
+    const userInfo = parseJWT(data.idToken);
+
+    const user: User = {
+      id: userInfo.sub,
+      email: userInfo.email || "",
+      name: userInfo.name || phoneNumber,
+      provider: "username",
+      idToken: data.idToken,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+    };
+
+    console.log("✅ 手机号登录成功，保存所有tokens");
+
+    // 保存用户信息
+    await saveUser(user);
+
+    return user;
+  } catch (error: any) {
+    console.error("❌ 验证手机登录验证码失败:", error);
+    throw error;
   }
 }

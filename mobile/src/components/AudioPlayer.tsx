@@ -13,6 +13,7 @@ interface AudioPlayerProps {
   isPlaying?: boolean;
   currentTime?: number;
   totalDuration?: number;
+  hasPlayedOnce?: boolean; // 是否曾经播放过（用于判断是否显示倒计时）
   onPlayPress: () => void;
   style?: any;
 }
@@ -23,6 +24,7 @@ export default function AudioPlayer({
   isPlaying = false,
   currentTime = 0,
   totalDuration = 0,
+  hasPlayedOnce = false, // 是否曾经播放过
   onPlayPress,
   style,
 }: AudioPlayerProps) {
@@ -34,14 +36,30 @@ export default function AudioPlayer({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const formatProgress = (current: number, total: number): string => {
-    const remaining = total - current;
-    return formatAudioDuration(remaining);
+  // 确定使用的总时长（优先使用 totalDuration，如果为 0 则使用 audioDuration）
+  const effectiveTotalDuration = totalDuration > 0 ? totalDuration : (audioDuration || 0);
+
+  // 格式化显示时间
+  const formatDisplayTime = (): string => {
+    // 如果从未播放过，只显示总时长，不显示倒计时
+    if (!hasPlayedOnce) {
+      return formatAudioDuration(effectiveTotalDuration);
+    }
+
+    // 如果播放过，显示 "剩余时间 | 总时长"
+    if (effectiveTotalDuration <= 0) {
+      return formatAudioDuration(audioDuration || 0);
+    }
+
+    // 计算剩余时间（使用当前时间，无论是播放还是暂停）
+    const remaining = Math.max(0, effectiveTotalDuration - currentTime);
+    const remainingFormatted = formatAudioDuration(remaining);
+    const totalFormatted = formatAudioDuration(effectiveTotalDuration);
+
+    return `${remainingFormatted} | ${totalFormatted}`;
   };
 
-  const displayTime = isPlaying
-    ? formatProgress(currentTime, totalDuration || audioDuration || 0)
-    : formatAudioDuration(audioDuration || 0);
+  const displayTime = formatDisplayTime();
 
   return (
     <TouchableOpacity

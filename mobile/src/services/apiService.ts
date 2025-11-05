@@ -149,11 +149,35 @@ class APIService {
       let data;
       const contentType = response.headers.get("content-type");
 
-      // 如果响应是JSON，解析它
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json();
+      // 对于服务器错误（5xx），先读取文本，避免 JSON 解析错误
+      if (response.status >= 500) {
+        try {
+          const textData = await response.text();
+          // 尝试解析为 JSON，如果失败则使用文本
+          try {
+            data = JSON.parse(textData);
+          } catch {
+            // 不是 JSON，使用文本
+            data = textData;
+          }
+        } catch (textError) {
+          // 如果读取文本也失败，设置默认值
+          data = { detail: "服务器错误" };
+        }
+      } else if (contentType && contentType.includes("application/json")) {
+        // 正常情况：尝试解析 JSON
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          // JSON 解析失败，可能是响应格式有问题
+          console.error("❌ JSON 解析失败:", jsonError);
+          const textData = await response.text();
+          console.error("📄 原始响应内容:", textData.substring(0, 200));
+          // 尝试从文本中提取信息
+          data = textData;
+        }
       } else {
-        // 否则作为文本处理
+        // 其他内容类型，作为文本处理
         data = await response.text();
       }
 
@@ -244,6 +268,10 @@ class APIService {
           errorMessage = "没有权限访问";
         } else if (response.status === 404) {
           errorMessage = "资源不存在";
+        } else if (response.status === 502) {
+          errorMessage = "服务暂时不可用，请稍后重试";
+        } else if (response.status === 503) {
+          errorMessage = "服务暂时不可用，请稍后重试";
         } else if (response.status >= 500) {
           errorMessage = "服务暂时不可用，请稍后重试";
         } else if (response.status === 400) {

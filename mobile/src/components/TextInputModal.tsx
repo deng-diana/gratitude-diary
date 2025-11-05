@@ -69,6 +69,9 @@ export default function TextInputModal({
   const [processingProgress, setProcessingProgress] = useState(0);
   const progressAnimationRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ✅ 新增:保存状态保护 - 防止重复调用
+  const isSavingRef = useRef(false);
+
   // Toast 状态
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
@@ -335,6 +338,14 @@ export default function TextInputModal({
 
   // 保存并关闭
   const handleSaveAndClose = async () => {
+    // ✅ 防止重复调用
+    if (isSavingRef.current) {
+      console.log("⏳ 正在保存中，跳过重复调用");
+      return;
+    }
+
+    isSavingRef.current = true;
+
     try {
       console.log("💾 保存日记...");
 
@@ -365,6 +376,8 @@ export default function TextInputModal({
         t("error.saveFailed"),
         error.message || t("error.retryMessage")
       );
+    } finally {
+      isSavingRef.current = false;
     }
   };
 
@@ -669,7 +682,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     ...Typography.body,
-    backgroundColor: "#F5EDDB",
+    backgroundColor: "#FAF6ED",
     borderRadius: 12,
     padding: 16,
     paddingBottom: 40,

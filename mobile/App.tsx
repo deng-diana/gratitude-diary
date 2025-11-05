@@ -15,13 +15,8 @@ import {
   NotoSerifSC_500Medium,
   NotoSerifSC_600SemiBold,
 } from "@expo-google-fonts/noto-serif-sc";
-import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-
-// 防止启动屏自动隐藏
-SplashScreen.preventAutoHideAsync();
-
 import React from "react";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import AppNavigator from "./src/navigation/AppNavigator";
 
@@ -38,16 +33,13 @@ export default function App() {
     NotoSerifSC_600SemiBold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded || fontError) {
-      // 字体加载完成，隐藏启动屏
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
-
-  // 字体未加载完成时，不渲染UI
+  // 字体未加载完成时，显示与WelcomeScreen一致的背景色（减少闪屏感）
   if (!fontsLoaded && !fontError) {
-    return null;
+    return (
+      <SafeAreaProvider>
+        <View style={{ flex: 1, backgroundColor: "#FAF6ED" }} />
+      </SafeAreaProvider>
+    );
   }
 
   return (

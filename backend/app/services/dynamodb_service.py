@@ -1,7 +1,7 @@
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 from typing import List, Optional
-from app.config import get_settings
+from ..config import get_settings
 import uuid
 from datetime import datetime, timezone
 
@@ -9,23 +9,38 @@ from datetime import datetime, timezone
 class DynamoDBService:
     """DynamoDB数据库服务"""
     def __init__(self):
-        settings=get_settings()
-        # 创建DynamoDB客户端
-        self.dynamodb=boto3.resource(
-            "dynamodb",
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key
-        )
-        # 获取表
-        self.table=self.dynamodb.Table(settings.dynamodb_table_name)
+        try:
+            settings=get_settings()
+            print(f"🔍 DynamoDB初始化 - 区域: {settings.aws_region}, 表名: {settings.dynamodb_table_name}")
+            
+            # 创建DynamoDB客户端
+            # 在Lambda环境中，boto3会自动使用IAM角色凭证
+            # 使用默认凭证链（IAM角色、环境变量等）
+            self.dynamodb=boto3.resource(
+                "dynamodb",
+                region_name=settings.aws_region
+            )
+            # 获取表
+            self.table=self.dynamodb.Table(settings.dynamodb_table_name)
+            
+            # 验证表是否存在（延迟加载，不实际访问）
+            print(f"✅ DynamoDB客户端初始化成功")
+        except Exception as e:
+            print(f"❌ DynamoDB初始化失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def create_diary(
         self, 
         user_id:str,
         original_content:str,
         polished_content:str,
-        ai_feedback:str
+        ai_feedback:str,
+        language: str = "zh",                 # ← 新增：语言
+        title: str = "日记",                  # ← 新增：标题
+        audio_url: Optional[str] = None,      # ← 新增
+        audio_duration: Optional[int] = None  # ← 新增
     ) -> dict:
         """ 创建日记
         
@@ -48,10 +63,17 @@ class DynamoDBService:
             'userId':user_id,
             'createdAt':create_at,
             'date':date,
+            'language': language,              # ← 新增：语言
+            'title': title,                   # ← 新增：标题
             'originalContent':original_content,
             'polishedContent': polished_content,
             'aiFeedback': ai_feedback
         }
+         #✅ 如果有音频信息，添加到item
+        if audio_url:
+            item['audioUrl'] = audio_url
+        if audio_duration:
+            item['audioDuration'] = audio_duration
         # 保存到DynamoDB
 
         try:
@@ -62,10 +84,13 @@ class DynamoDBService:
                 'user_id': user_id,
                 'created_at': create_at,
                 'date': date,
+                'language': language,              # ← 新增：语言
+                'title': title,                   # ← 新增：标题
                 'original_content': original_content,
                 'polished_content': polished_content,
-                'ai_feedback': ai_feedback
-
+                'ai_feedback': ai_feedback,
+                'audio_url':audio_url,
+                'audio_duration':audio_duration
             }
         except Exception as e:
             print(f"保存日记失败:{str(e)}")
@@ -86,12 +111,20 @@ class DynamoDBService:
             日记列表
         """
         try:
+            print(f"🔍 DynamoDB查询 - 表名: {self.table.table_name}, 用户ID: {user_id}, limit: {limit}")
+            
+            # 验证用户ID
+            if not user_id or not user_id.strip():
+                raise ValueError("用户ID不能为空")
+            
             # 查询该用户的所有日记
             response = self.table.query(
                 KeyConditionExpression=Key('userId').eq(user_id),
                 ScanIndexForward=False,  # 倒序排列(最新的在前)
                 Limit=limit
             )
+            
+            print(f"📊 DynamoDB响应 - 返回项目数: {len(response.get('Items', []))}")
             
             # 转换格式
             diaries = []
@@ -101,52 +134,202 @@ class DynamoDBService:
                     'user_id': item.get('userId', ''),
                     'created_at': item.get('createdAt', ''),
                     'date': item.get('date', ''),
+                    'language': item.get('language', 'zh'),      # ← 新增：语言
+                    'title': item.get('title', '日记'),           # ← 新增：标题
                     'original_content': item.get('originalContent', ''),
                     'polished_content': item.get('polishedContent', ''),
-                    'ai_feedback': item.get('aiFeedback', '')
+                    'ai_feedback': item.get('aiFeedback', ''),
+                    'audio_url': item.get('audioUrl'),
+                    'audio_duration': item.get('audioDuration')
                 })
             
+            print(f"✅ DynamoDB查询成功 - 转换后日记数: {len(diaries)}")
             return diaries
         except Exception as e:
-            print(f"获取日记列表失败: {str(e)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"❌ 获取日记列表失败:")
+            print(f"   错误类型: {type(e).__name__}")
+            print(f"   错误信息: {str(e)}")
+            print(f"   错误堆栈:\n{error_trace}")
             raise
     
     def get_diary_by_id(
         self,
-        user_id: str,
-        created_at: str
+        diary_id: str,
+        user_id: str
     ) -> Optional[dict]:
         """
-        获取单条日记
+        根据diary_id获取单条日记
         
         参数:
+            diary_id: 日记ID
             user_id: 用户ID
-            created_at: 创建时间
         
         返回:
             日记对象或None
         """
         try:
-            response = self.table.get_item(
-                Key={
-                    'userId': user_id,
-                    'createdAt': created_at
-                }
+            # 使用scan查询，因为diary_id不是主键
+            response = self.table.scan(
+                FilterExpression=Attr('diaryId').eq(diary_id) & Attr('userId').eq(user_id)
             )
             
-            item = response.get('Item')
-            if not item:
+            items = response.get('Items', [])
+            if not items:
                 return None
+            
+            item = items[0]  # 取第一个匹配的项
             
             return {
                 'diary_id': item.get('diaryId', 'unknown'),
                 'user_id': item.get('userId', ''),
                 'created_at': item.get('createdAt', ''),
                 'date': item.get('date', ''),
+                'language': item.get('language', 'zh'),      # ← 新增：语言
+                'title': item.get('title', '日记'),           # ← 新增：标题
                 'original_content': item.get('originalContent', ''),
                 'polished_content': item.get('polishedContent', ''),
-                'ai_feedback': item.get('aiFeedback', '')
+                'ai_feedback': item.get('aiFeedback', ''),
+                'audio_url': item.get('audioUrl'),
+                'audio_duration': item.get('audioDuration')
             }
+            
         except Exception as e:
             print(f"获取日记失败: {str(e)}")
+            raise
+
+    def update_diary(
+        self,
+        diary_id: str,
+        user_id: str,
+        polished_content: str = None,
+        title: str = None
+    ) -> dict:
+        """
+        更新日记内容和/或标题
+        
+        参数:
+            diary_id: 日记ID
+            user_id: 用户ID
+            polished_content: 新的润色内容（可选）
+            title: 新的标题（可选）
+        
+        返回:
+            更新后的日记对象
+        """
+        try:
+            # 使用 GSI 通过 diaryId 直接查询
+            response = self.table.query(
+                IndexName='diaryId-index',
+                KeyConditionExpression=Key('diaryId').eq(diary_id)
+            )
+            
+            items = response.get('Items', [])
+            if not items:
+                raise ValueError(f"找不到日记ID: {diary_id}")
+            
+            # 获取日记信息
+            diary_item = items[0]
+            created_at = diary_item.get('createdAt')
+            
+            # 验证权限：确保用户只能更新自己的日记
+            if diary_item.get('userId') != user_id:
+                raise PermissionError("无权修改此日记")
+            
+            print(f"🔍 找到日记 - ID: {diary_id}, 用户: {user_id}, 创建时间: {created_at}")
+            
+            # 构建动态更新表达式
+            update_expressions = []
+            expression_values = {}
+            
+            if polished_content is not None:
+                update_expressions.append('polishedContent = :pc')
+                expression_values[':pc'] = polished_content
+                print(f"📝 将更新内容: {polished_content[:50]}...")
+            
+            if title is not None:
+                update_expressions.append('title = :t')
+                expression_values[':t'] = title
+                print(f"📝 将更新标题: {title}")
+            
+            if not update_expressions:
+                raise ValueError("至少需要提供 polished_content 或 title 之一")
+            
+            # 更新日记
+            response = self.table.update_item(
+                Key={
+                    'userId': user_id,
+                    'createdAt': created_at
+                },
+                UpdateExpression=f"SET {', '.join(update_expressions)}",
+                ExpressionAttributeValues=expression_values,
+                ReturnValues='ALL_NEW'
+            )
+            
+            print(f"✅ DynamoDB更新成功")
+            
+            # 获取更新后的数据
+            updated_item = response.get('Attributes', {})
+            
+            # 返回更新后的数据
+            return {
+                'diary_id': diary_id,
+                'user_id': user_id,
+                'created_at': created_at,
+                'date': updated_item.get('date', diary_item.get('date', '')),
+                'language': updated_item.get('language', diary_item.get('language', 'zh')),
+                'title': updated_item.get('title', diary_item.get('title', '日记')),
+                'original_content': updated_item.get('originalContent', diary_item.get('originalContent', '')),
+                'polished_content': updated_item.get('polishedContent', diary_item.get('polishedContent', '')),
+                'ai_feedback': updated_item.get('aiFeedback', diary_item.get('aiFeedback', '')),
+                'audio_url': updated_item.get('audioUrl', diary_item.get('audioUrl')),
+                'audio_duration': updated_item.get('audioDuration', diary_item.get('audioDuration'))
+            }
+            
+        except Exception as e:
+            print(f"更新日记失败: {str(e)}")
+            raise
+
+    def delete_diary(
+        self,
+        diary_id: str,
+        user_id: str
+    ):
+        """
+        删除日记
+        
+        参数:
+            diary_id: 日记ID
+            user_id: 用户ID
+        """
+        try:
+            # 使用 GSI 通过 diaryId 直接查询
+            response = self.table.query(
+                IndexName='diaryId-index',
+                KeyConditionExpression=Key('diaryId').eq(diary_id)
+            )
+            
+            items = response.get('Items', [])
+            if not items:
+                raise ValueError(f"找不到日记ID: {diary_id}")
+            
+            # 获取日记信息
+            diary_item = items[0]
+            created_at = diary_item.get('createdAt')
+            
+            # 验证权限：确保用户只能删除自己的日记
+            if diary_item.get('userId') != user_id:
+                raise PermissionError("无权删除此日记")
+            
+            # 删除日记
+            self.table.delete_item(
+                Key={
+                    'userId': user_id,
+                    'createdAt': created_at
+                }
+            )
+            
+        except Exception as e:
+            print(f"删除日记失败: {str(e)}")
             raise

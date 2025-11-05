@@ -20,24 +20,102 @@ export default {
     retry: "Retry",
     close: "Close",
     done: "Done",
+    rerecord: "Record Again",
+    useTextInput: "Use Text Input",
+  },
+
+  // Onboarding流程
+  onboarding: {
+    welcome: {
+      title: "Welcome to Thankly",
+      subtitle:
+        "In this gentle space, voice or text preserving what matters to you",
+      privacyNotice:
+        "Read our {{privacyPolicy}}. Tap 'Agree & Continue' to accept the {{termsOfService}}.",
+      privacyPolicy: "Privacy Policy",
+      termsOfService: "Terms of Service",
+      agreeButton: "Agree & Continue",
+    },
+    skip: "Skip",
+    guide1: {
+      title: "Just speak it out",
+      subtitle: "No typing needed — just share what's on your heart",
+    },
+    guide2: {
+      title: "Every moment matters",
+      subtitle:
+        "Joy, sadness, or ordinary days — they're all part of your story",
+    },
+    guide3: {
+      title: "Start today",
+      subtitle: "One minute before bed, capture today's warm moment",
+      getStartedButton: "Get Started",
+    },
   },
 
   // 登录页面
   login: {
-    title: "Welcome",
-    subtitle: "Sign in to continue",
+    title: "Log in or sign up",
+    subtitle: "Get started quickly with email or phone",
+    emailTab: "Email",
+    phoneTab: "Phone",
+    emailPlaceholder: "Email address",
+    phonePlaceholder: "Phone number",
+    passwordPlaceholder: "Password",
+    continueButton: "Continue",
+    orDivider: "OR",
     appleSignIn: "Sign in with Apple",
     googleSignIn: "Sign in with Google",
     signingIn: "Signing in...",
     termsHint:
       "By signing in, you agree to our Terms of Service and Privacy Policy",
+    withOtherAccounts: "With other accounts",
+    email: "Email",
+    phone: "Phone",
+    continue: "Continue",
+    continueWithEmail: "Continue with email",
+    forgotPassword: "Forgot password?",
+    emailLogin: "Email Login",
+    phoneLogin: "Phone Login",
+    phoneNumber: "Phone Number",
+    phoneNumberPlaceholder: "Phone number",
+    verificationCode: "Verification Code",
+    verificationCodePlaceholder: "Enter verification code",
+    sendCode: "Send Code",
+    resendCode: "Resend",
+    verifyAndLogin: "Verify and Login",
+    namePrompt: {
+      title: "What should we call you?",
+      subtitle: "We'll use this name to greet you on the home page",
+      placeholder: "Enter your name",
+    },
+    codeSent: "Code Sent",
+    codeSentMessage: "Verification code has been sent to your phone",
+    enterPhoneFirst: "Please enter phone number first",
+    enterCodeFirst: "Please enter verification code",
+    invalidPhoneNumber:
+      "Invalid phone number format, please include country code (e.g., +1)",
+    codeExpired: "Verification code expired, please request a new one",
+    codeMismatch: "Incorrect verification code, please try again",
+    switchToEmail: "Switch to Email Login",
+    switchToPhone: "Switch to Phone Login",
+    countdown: "Resend in {{seconds}}s",
+    loginDescription: "Sign in or create a new account",
+    selectCountry: "Select Country/Region",
+    searchCountry: "Search country or code",
+  },
+
+  // 录音相关
+  recording: {
+    nearLimit: "1 minute left",
+    maxReached: "10 minute limit reached",
   },
 
   // 首页/日记列表
   home: {
-    welcome: "Hello there",
+    welcome: "Hi {name}",
     subtitle:
-      "In this gentle space, voice or text preserving what matters to you",
+      "This is your gentle space, voice or text preserving what matters to you",
     myDiary: "Moments I've Kept",
     noDiaries: "Nothing here yet",
     noDiariesHint: "Tap below to capture\nyour first warm moment",
@@ -167,6 +245,11 @@ export default {
       "Please enable microphone access in Settings to record audio.",
     genericError: "An error occurred",
     retryMessage: "Please try again",
+    emptyRecording: {
+      title: "No valid content detected",
+      message:
+        "We didn't hear any speech. Please try speaking your gratitude or use text input instead.",
+    },
   },
 
   // 成功提示
@@ -194,5 +277,32 @@ export default {
   dateFormat: {
     month: "", // 英文不需要"月"字
     day: "", // 英文不需要"日"字
+  },
+
+  // 注册页面
+  signup: {
+    title: "Create Account",
+    subtitle: "Sign up to get started",
+    email: "Email",
+    emailPlaceholder: "Enter email address",
+    username: "Username",
+    usernamePlaceholder: "Enter username",
+    password: "Password",
+    passwordPlaceholder: "Enter password (at least 8 characters)",
+    confirmPassword: "Confirm Password",
+    confirmPasswordPlaceholder: "Re-enter password",
+    signUp: "Sign Up",
+    signingUp: "Signing up...",
+    alreadyHaveAccount: "Already have an account?",
+    signIn: "Sign in",
+    passwordMismatch: "Passwords do not match",
+    passwordTooShort: "Password must be at least 8 characters",
+    invalidEmail: "Invalid email format",
+    usernameRequired: "Username is required",
+    emailRequired: "Email is required",
+    phoneSignUp: "Phone Sign Up",
+    phoneSignUpMessage: "Verification code has been sent to your phone",
+    phoneAlreadyRegistered:
+      "This phone number is already registered, please login directly",
   },
 };

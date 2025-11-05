@@ -85,6 +85,9 @@ export default function DiaryDetailScreen({
   const [editedTitle, setEditedTitle] = useState("");
   const [editedContent, setEditedContent] = useState("");
 
+  // ✅ 新增:保存状态保护
+  const isSavingRef = useRef(false);
+
   // ✅ 新增:Toast状态
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
@@ -163,23 +166,49 @@ export default function DiaryDetailScreen({
   const finishEditing = async () => {
     if (!diary) return;
 
+    // ✅ 防止重复调用
+    if (isSavingRef.current) {
+      console.log("⏳ 正在保存中，跳过重复调用");
+      return;
+    }
+    isSavingRef.current = true;
+
     try {
-      // 更新本地显示
-      if (isEditingTitle && editedTitle.trim()) {
-        diary.title = editedTitle.trim();
-      }
-      if (isEditingContent && editedContent.trim()) {
-        diary.polished_content = editedContent.trim();
+      console.log("💾 保存到后端...");
+
+      // ✅ 检查是否有修改
+      const hasTitleChange = isEditingTitle && editedTitle.trim() !== diary.title;
+      const hasContentChange = isEditingContent && editedContent.trim() !== diary.polished_content;
+
+      // ✅ 如果有修改，调用后端API更新
+      if (hasTitleChange || hasContentChange) {
+        console.log("📝 更新日记到后端:", diary.diary_id);
+        console.log("  - 标题变化:", hasTitleChange);
+        console.log("  - 内容变化:", hasContentChange);
+
+        await updateDiary(
+          diary.diary_id,
+          hasContentChange ? editedContent.trim() : undefined,
+          hasTitleChange ? editedTitle.trim() : undefined
+        );
+
+        console.log("✅ 后端更新成功");
+
+        // ✅ 更新本地状态
+        if (hasTitleChange) {
+          setDiary({ ...diary, title: editedTitle.trim() });
+        }
+        if (hasContentChange) {
+          setDiary({ ...diary, polished_content: editedContent.trim() });
+        }
+      } else {
+        console.log("📝 没有修改，跳过更新");
       }
 
       setIsEditingTitle(false);
       setIsEditingContent(false);
-
-      console.log("💾 保存到后端...");
-
-      // 调用后端API更新
-      const finalContent = editedContent.trim() || diary.polished_content;
-      await updateDiary(diary.diary_id, finalContent);
+      setEditedTitle("");
+      setEditedContent("");
 
       console.log("✅ 保存成功");
 
@@ -191,7 +220,7 @@ export default function DiaryDetailScreen({
         onUpdate();
       }
 
-      // ✅ 关闭Modal (onClose会触发父组件的useFocusEffect刷新列表)
+      // ✅ 关闭Modal
       closeSheet();
     } catch (error: any) {
       console.error("❌ 保存失败:", error);
@@ -199,6 +228,8 @@ export default function DiaryDetailScreen({
         t("error.saveFailed"),
         error.message || t("error.retryMessage")
       );
+    } finally {
+      isSavingRef.current = false;
     }
   };
 

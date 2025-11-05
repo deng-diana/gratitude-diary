@@ -2,15 +2,30 @@ import React, { useState, useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
+import * as SecureStore from "expo-secure-store";
 
 import LoginScreen from "../screens/LoginScreen";
 import DiaryListScreen from "../screens/DiaryListScreen";
 import CreateTextDiaryScreen from "../screens/CreateTextDiaryScreen";
 import TestScreen from "../screens/TestScreen";
+import WelcomeScreen from "../screens/WelcomeScreen";
+import OnboardingCarousel from "../components/OnboardingCarousel";
+import OnboardingScreen1 from "../screens/OnboardingScreen1";
+import OnboardingScreen2 from "../screens/OnboardingScreen2";
+import OnboardingScreen3 from "../screens/OnboardingScreen3";
+import PrivacyPolicyScreen from "../screens/PrivacyPolicyScreen";
+import TermsOfServiceScreen from "../screens/TermsOfServiceScreen";
 import { getCurrentUser, signOut } from "../services/authService";
 import { apiService } from "../services/apiService";
 
 export type RootStackParamList = {
+  Welcome: undefined;
+  OnboardingCarousel: undefined;
+  Onboarding1: undefined;
+  Onboarding2: undefined;
+  Onboarding3: undefined;
+  PrivacyPolicy: undefined;
+  TermsOfService: undefined;
   Login: undefined;
   DiaryList: undefined;
   CreateDiary: { inputMode?: "voice" | "text" };
@@ -19,11 +34,19 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// 🛠️ 开发模式：始终显示Onboarding（方便测试和调试）
+// ⚠️⚠️⚠️ 上线前必须改为 false！恢复为仅新用户显示 ⚠️⚠️⚠️
+const DEV_MODE_FORCE_ONBOARDING = true; // ⚠️ 上线前改为 false
+
 export default function AppNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState<
+    boolean | null
+  >(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    checkOnboardingStatus();
     checkAuthStatus();
 
     // 注册认证过期监听器
@@ -43,6 +66,26 @@ export default function AppNavigator() {
   }, [refreshKey]);
 
   /**
+   * 检查是否已完成Onboarding
+   * 首次安装时显示引导流程
+   */
+  const checkOnboardingStatus = async () => {
+    try {
+      const completed = await SecureStore.getItemAsync(
+        "hasCompletedOnboarding"
+      );
+      setHasCompletedOnboarding(completed === "true");
+      console.log(
+        "🔍 检查Onboarding状态:",
+        completed === "true" ? "已完成" : "未完成"
+      );
+    } catch (error) {
+      console.error("❌ 检查Onboarding状态失败:", error);
+      setHasCompletedOnboarding(false);
+    }
+  };
+
+  /**
    * 检查用户是否已登录
    * 应用启动时调用，从SecureStore恢复登录状态
    */
@@ -58,20 +101,32 @@ export default function AppNavigator() {
   };
 
   /**
-   * 根据认证状态决定初始路由
-   * - isAuthenticated === null: 正在检查（显示loading）
-   * - isAuthenticated === true: 用户已登录，跳转到日记列表
-   * - isAuthenticated === false: 用户未登录，显示登录页
+   * 根据认证状态和Onboarding状态决定初始路由
+   * 优先级：Onboarding > 认证状态
    */
   const getInitialRouteName = (): keyof RootStackParamList => {
-    if (isAuthenticated === null) {
-      return "Login"; // 默认值，实际不会显示因为我们在loading
+    // 🛠️ 开发模式：始终显示Onboarding
+    if (DEV_MODE_FORCE_ONBOARDING) {
+      return "Welcome";
     }
+
+    // 如果还没检查完成，返回默认值（不会显示，因为会显示loading）
+    if (hasCompletedOnboarding === null || isAuthenticated === null) {
+      return "Welcome";
+    }
+
+    // 如果未完成Onboarding，显示欢迎页
+    if (!hasCompletedOnboarding) {
+      return "Welcome";
+    }
+
+    // 如果已完成Onboarding，根据认证状态决定
     return isAuthenticated ? "DiaryList" : "Login";
   };
 
-  // 显示加载状态，直到确定认证状态
-  if (isAuthenticated === null) {
+  // 显示加载状态，直到确定所有状态
+  // 🛠️ 开发模式下，直接显示WelcomeScreen，减少闪屏感
+  if (!DEV_MODE_FORCE_ONBOARDING && (isAuthenticated === null || hasCompletedOnboarding === null)) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#D96F4C" />
@@ -87,6 +142,25 @@ export default function AppNavigator() {
           headerShown: false,
         }}
       >
+        {/* Onboarding流程 */}
+        <Stack.Screen name="Welcome" component={WelcomeScreen} />
+        <Stack.Screen name="OnboardingCarousel" component={OnboardingCarousel} />
+        {/* 保留旧的单个屏幕路由，用于向后兼容 */}
+        <Stack.Screen name="Onboarding1" component={OnboardingScreen1} />
+        <Stack.Screen name="Onboarding2" component={OnboardingScreen2} />
+        <Stack.Screen name="Onboarding3" component={OnboardingScreen3} />
+        <Stack.Screen
+          name="PrivacyPolicy"
+          component={PrivacyPolicyScreen}
+          options={{ presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="TermsOfService"
+          component={TermsOfServiceScreen}
+          options={{ presentation: "modal" }}
+        />
+
+        {/* 主要功能页面 */}
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="DiaryList" component={DiaryListScreen} />
         <Stack.Screen name="CreateDiary" component={CreateTextDiaryScreen} />
@@ -101,6 +175,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#FAF6ED", // 与WelcomeScreen背景色一致
   },
 });

@@ -144,9 +144,26 @@ export async function createVoiceDiary(
     if (!response.ok) {
       // 尝试解析友好的错误
       let errorMessage = "上传失败";
+      let errorCode = null;
       try {
         const error = await response.json();
-        errorMessage = error.detail || error.error || errorMessage;
+        // 检查是否是结构化错误（包含 code 字段）
+        if (typeof error.detail === "string") {
+          try {
+            const parsed = JSON.parse(error.detail);
+            if (parsed.code) {
+              errorCode = parsed.code;
+              errorMessage = parsed.message || errorMessage;
+            }
+          } catch {
+            // 如果不是 JSON，使用原字符串
+            errorMessage = error.detail || error.error || errorMessage;
+          }
+        } else if (error.detail) {
+          errorMessage = error.detail;
+        } else if (error.error) {
+          errorMessage = error.error;
+        }
       } catch (_) {}
 
       // 规范化提示
@@ -156,7 +173,11 @@ export async function createVoiceDiary(
       ) {
         errorMessage = "登录已过期，请重新登录";
       }
-      throw new Error(errorMessage);
+      
+      // 创建错误对象，携带错误码
+      const error = new Error(errorMessage) as any;
+      error.code = errorCode;
+      throw error;
     }
 
     const diary = await response.json();

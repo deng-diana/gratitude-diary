@@ -2,11 +2,27 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.openapi.utils import get_openapi
-from app.routers import diary
-from app.config import get_settings
+from datetime import datetime  # 用于健康检查的时间戳
+from .routers import diary, auth  # 新增 auth 路由
+from .config import get_settings
 
-# 获取配置
-settings=get_settings()
+# 获取配置（延迟初始化，避免启动时失败）
+try:
+    settings=get_settings()
+    print(f"✅ 配置加载成功 - 表名: {settings.dynamodb_table_name}, 区域: {settings.aws_region}")
+except Exception as e:
+    print(f"❌ 配置加载失败: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    # 设置默认值，避免应用无法启动
+    class DefaultSettings:
+        app_name = "Gratitude Diary API"
+        dynamodb_table_name = "GratitudeDiaries"
+        aws_region = "us-east-1"
+        cognito_region = "us-east-1"
+        cognito_user_pool_id = ""
+        cognito_client_id = ""
+    settings = DefaultSettings()
 
 # 定义HTTP Bearer安全方案
 # 这会让Swagger UI显示🔓 Authorize按钮
@@ -71,9 +87,24 @@ app.add_middleware(
 )
 
 # 注册路由
+# 认证路由 - 不需要认证前缀
+app.include_router(
+    auth.router,
+    prefix="/auth",
+    tags=["认证"]
+)
+
+# 日记路由
 app.include_router(
     diary.router,
     prefix="/diary",#所有diary.router的路径前加/diary
+    tags=["日记管理"]
+)
+
+# 添加兼容性路由 - 支持 /diaries 路径
+app.include_router(
+    diary.router,
+    prefix="/diaries",#支持 /diaries 路径
     tags=["日记管理"]
 )
 # 根路径
@@ -86,7 +117,29 @@ async def root():
         "docs":"/docs"
     }
 # 健康检查端点
-@app.get("/heath",tags=["健康检查"])
+@app.get("/health",tags=["健康检查"])
 async def health_check():
     """检查API是否正常运行"""
-    return {"status":"healthy"}
+    try:
+        # 测试配置是否正常
+        config_status = "ok"
+        try:
+            settings = get_settings()
+            if not settings.dynamodb_table_name:
+                config_status = "missing_config"
+        except Exception as e:
+            config_status = f"config_error: {str(e)}"
+        
+        return {
+            "status": "healthy",
+            "config": config_status,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        print(f"❌ 健康检查失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }

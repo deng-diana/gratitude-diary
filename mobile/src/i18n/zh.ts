@@ -19,22 +19,97 @@ export default {
     retry: "重试",
     close: "关闭",
     done: "完成",
+    rerecord: "重录",
+    useTextInput: "改用文字输入",
+  },
+
+  // Onboarding流程
+  onboarding: {
+    welcome: {
+      title: "欢迎来到感记",
+      subtitle: "这里是你的温柔角落，用声音或文字，留住在意的一切",
+      privacyNotice:
+        "阅读我们的{{privacyPolicy}}，点击「同意并继续」即表示接受{{termsOfService}}",
+      privacyPolicy: "隐私政策",
+      termsOfService: "服务条款",
+      agreeButton: "同意并继续",
+    },
+    skip: "跳过",
+    guide1: {
+      title: "说出来就好",
+      subtitle: "不用打字，只需轻声说出此刻的感受",
+    },
+    guide2: {
+      title: "每一刻都值得留住",
+      subtitle: "开心的、难过的、平淡的，都是你真实的样子, 都值得被记录",
+    },
+    guide3: {
+      title: "从今天开始",
+      subtitle: "睡前一分钟，记下今天的温暖时刻, 让生活慢慢变得温",
+      getStartedButton: "开始记录",
+    },
   },
 
   // 登录页面
   login: {
-    title: "欢迎",
-    subtitle: "登录以继续",
+    title: "登录或注册",
+    subtitle: "使用邮箱或手机号快速开始",
+    emailTab: "邮箱",
+    phoneTab: "手机",
+    emailPlaceholder: "邮箱地址",
+    phonePlaceholder: "手机号",
+    passwordPlaceholder: "密码",
+    continueButton: "继续",
+    orDivider: "或",
     appleSignIn: "使用 Apple 登录",
     googleSignIn: "使用 Google 登录",
     signingIn: "登录中...",
     termsHint: "登录即表示同意我们的服务条款和隐私政策",
+    withOtherAccounts: "使用其他账号",
+    email: "邮箱",
+    phone: "手机号",
+    continue: "继续",
+    continueWithEmail: "使用邮箱继续",
+    forgotPassword: "忘记密码？",
+    emailLogin: "邮箱登录",
+    phoneLogin: "手机号登录",
+    phoneNumber: "手机号",
+    phoneNumberPlaceholder: "手机号",
+    verificationCode: "验证码",
+    verificationCodePlaceholder: "请输入验证码",
+    sendCode: "发送验证码",
+    resendCode: "重新发送",
+    verifyAndLogin: "验证并登录",
+    namePrompt: {
+      title: "你希望我们怎么称呼你？",
+      subtitle: "我们会用这个名字在首页和你打招呼",
+      placeholder: "输入你的名字",
+    },
+    codeSent: "验证码已发送",
+    codeSentMessage: "验证码已发送到您的手机，请查收",
+    enterPhoneFirst: "请先输入手机号",
+    enterCodeFirst: "请输入验证码",
+    invalidPhoneNumber: "手机号格式错误，请包含国家代码（如+86）",
+    codeExpired: "验证码已过期，请重新获取",
+    codeMismatch: "验证码错误，请重试",
+    switchToEmail: "切换到邮箱登录",
+    switchToPhone: "切换到手机号登录",
+    countdown: "{{seconds}}秒后重新发送",
+    loginDescription: "登录或注册新账号",
+    selectCountry: "选择国家/地区",
+    searchCountry: "搜索国家或区号",
+  },
+
+  // 录音相关
+  recording: {
+    nearLimit: "还剩 1 分钟",
+    maxReached: "已达到 10 分钟上限",
   },
 
   // 首页/日记列表
   home: {
-    welcome: "你好呀",
-    subtitle: "在这个温柔角落，用声音或文字留住你在意的一切",
+    welcome: "Hi {name}",
+    subtitle: "这是属于你的温柔角落，用声音或文字留住你在意的一切",
     myDiary: "我留住的时刻",
     noDiaries: "还没有日记呢",
     noDiariesHint: "点击下方按钮\n记录第一个温暖时刻",
@@ -160,6 +235,10 @@ export default {
     audioPermissionMessage: "请在系统设置中允许访问麦克风以录制音频。",
     genericError: "发生错误",
     retryMessage: "请重试",
+    emptyRecording: {
+      title: "未检测到有效内容",
+      message: "似乎没有听到你的语音。请尝试说出你的感谢，或改用文字输入。",
+    },
   },
 
   // 成功提示
@@ -184,5 +263,31 @@ export default {
   dateFormat: {
     month: "月",
     day: "日",
+  },
+
+  // 注册页面
+  signup: {
+    title: "创建账号",
+    subtitle: "注册以开始使用",
+    email: "邮箱",
+    emailPlaceholder: "请输入邮箱地址",
+    username: "用户名",
+    usernamePlaceholder: "请输入用户名",
+    password: "密码",
+    passwordPlaceholder: "请输入密码（至少8位）",
+    confirmPassword: "确认密码",
+    confirmPasswordPlaceholder: "请再次输入密码",
+    signUp: "注册",
+    signingUp: "注册中...",
+    alreadyHaveAccount: "已有账号？",
+    signIn: "登录",
+    passwordMismatch: "两次输入的密码不一致",
+    passwordTooShort: "密码至少需要8个字符",
+    invalidEmail: "邮箱格式不正确",
+    usernameRequired: "请输入用户名",
+    emailRequired: "请输入邮箱",
+    phoneSignUp: "手机号注册",
+    phoneSignUpMessage: "验证码已发送到您的手机，请查收",
+    phoneAlreadyRegistered: "该手机号已注册，请直接登录",
   },
 };

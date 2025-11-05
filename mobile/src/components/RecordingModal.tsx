@@ -64,6 +64,7 @@ export default function RecordingModal({
   const [isPaused, setIsPaused] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [nearLimit, setNearLimit] = useState(false); // 9分钟预警状态
 
   // ✅ 新增:处理步骤状态
   const [processingStep, setProcessingStep] = useState(0);
@@ -145,12 +146,16 @@ export default function RecordingModal({
   const [isEditingContent, setIsEditingContent] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [editedContent, setEditedContent] = useState("");
+  const [hasChanges, setHasChanges] = useState(false); // ✅ 添加修改检测
 
   // ✅ 新增:音频播放状态(用于结果页)
   const [isPlayingResult, setIsPlayingResult] = useState(false);
   const [resultCurrentTime, setResultCurrentTime] = useState(0);
   const [resultDuration, setResultDuration] = useState(0);
   const resultSoundRef = useRef<Audio.Sound | null>(null);
+
+  // ✅ 新增:保存状态保护 - 防止重复调用
+  const isSavingRef = useRef(false);
 
   // ✅ 轻量 Toast（与删除成功保持一致样式）
   const [toastVisible, setToastVisible] = useState(false);
@@ -168,6 +173,7 @@ export default function RecordingModal({
   );
   const isStartingRef = useRef<boolean>(false);
   const hasShown9MinWarning = useRef<boolean>(false); // ✅ 防止重复弹窗
+  const startedAtRef = useRef<number | null>(null); // 录音开始时间戳
 
   // ✅ 新增:Modal 进入/退出动画
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -333,8 +339,10 @@ export default function RecordingModal({
       setIsProcessing(false);
       setShowResult(false);
       setResultDiary(null);
+      setNearLimit(false);
       isStartingRef.current = false;
       hasShown9MinWarning.current = false;
+      startedAtRef.current = null;
 
       console.log("❌ 录音已取消");
       onCancel();
@@ -515,7 +523,9 @@ export default function RecordingModal({
       setIsRecording(true);
       setIsPaused(false);
       setDuration(0);
+      setNearLimit(false);
       hasShown9MinWarning.current = false;
+      startedAtRef.current = Date.now();
 
       // 开始计时
       const interval = setInterval(async () => {
@@ -526,24 +536,25 @@ export default function RecordingModal({
               const seconds = Math.floor(status.durationMillis / 1000);
               setDuration(seconds);
 
-              // ✅ 9分钟预警
-              if (seconds === 540 && !hasShown9MinWarning.current) {
+              // ✅ 9分钟预警（还剩1分钟）
+              if (seconds >= 540 && !hasShown9MinWarning.current) {
                 hasShown9MinWarning.current = true;
-                Alert.alert(t("confirm.hint"), t("confirm.timeLimit"), [
-                  {
-                    text: t("diary.resumeRecording"),
-                    style: "default",
-                  },
-                  {
-                    text: t("common.done"),
-                    style: "default",
-                    onPress: () => handleFinishRecording(),
-                  },
-                ]);
+                setNearLimit(true);
+                
+                // 轻触反馈（iOS）
+                if (Platform.OS === "ios") {
+                  try {
+                    const Haptics = await import("expo-haptics");
+                    await Haptics.default.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  } catch (e) {
+                    console.log("Haptics 不可用:", e);
+                  }
+                }
               }
 
               // ✅ 10分钟自动停止
               if (seconds >= 600) {
+                setNearLimit(false);
                 await handleFinishRecording();
               }
             }
@@ -621,24 +632,25 @@ export default function RecordingModal({
               const seconds = Math.floor(status.durationMillis / 1000);
               setDuration(seconds);
 
-              // 9分钟预警
-              if (seconds === 540 && !hasShown9MinWarning.current) {
+              // ✅ 9分钟预警（还剩1分钟）
+              if (seconds >= 540 && !hasShown9MinWarning.current) {
                 hasShown9MinWarning.current = true;
-                Alert.alert(t("confirm.hint"), t("confirm.timeLimit"), [
-                  {
-                    text: t("diary.resumeRecording"),
-                    style: "default",
-                  },
-                  {
-                    text: t("common.done"),
-                    style: "default",
-                    onPress: () => handleFinishRecording(),
-                  },
-                ]);
+                setNearLimit(true);
+                
+                // 轻触反馈（iOS）
+                if (Platform.OS === "ios") {
+                  try {
+                    const Haptics = await import("expo-haptics");
+                    await Haptics.default.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  } catch (e) {
+                    console.log("Haptics 不可用:", e);
+                  }
+                }
               }
 
-              // 10分钟自动停止
+              // ✅ 10分钟自动停止
               if (seconds >= 600) {
+                setNearLimit(false);
                 await handleFinishRecording();
               }
             }
@@ -753,28 +765,32 @@ export default function RecordingModal({
         cleanupSteps && cleanupSteps();
         console.error("❌ 处理失败:", error);
 
-        // ✅ 检查是否是空内容错误
-        if (
-          error.message &&
-          (error.message.includes("空内容") ||
-            error.message.includes("未能识别到") ||
-            error.message.includes("识别到的内容过短") ||
-            error.message.includes("检测到的内容过于简单") ||
-            error.message.includes("检测到的内容主要是语气词") ||
-            error.message.includes("检测到的内容只包含标点符号") ||
-            error.message.includes("未能识别到任何语音内容"))
-        ) {
-          Alert.alert(t("confirm.hint"), t("diary.noVoiceDetected"), [
-            {
-              text: t("diary.startRecording"),
-              onPress: () => startRecording(),
-            },
-            {
-              text: t("common.cancel"),
-              style: "cancel",
-              onPress: () => onCancel(),
-            },
-          ]);
+        // ✅ 检查是否是空内容错误（EMPTY_TRANSCRIPT）
+        if (error.code === "EMPTY_TRANSCRIPT" || 
+            (error.message && (
+              error.message.includes("No valid speech detected") ||
+              error.message.includes("空内容") ||
+              error.message.includes("未能识别到") ||
+              error.message.includes("识别到的内容过短") ||
+              error.message.includes("检测到的内容过于简单") ||
+              error.message.includes("检测到的内容主要是语气词") ||
+              error.message.includes("检测到的内容只包含标点符号") ||
+              error.message.includes("未能识别到任何语音内容")
+            ))) {
+          // 空内容错误：只提供"重录"选项
+          Alert.alert(
+            t("error.emptyRecording.title"),
+            t("error.emptyRecording.message"),
+            [
+              {
+                text: t("common.rerecord"),
+                onPress: () => {
+                  setIsProcessing(false);
+                  startRecording();
+                },
+              },
+            ]
+          );
           return;
         }
 
@@ -787,7 +803,10 @@ export default function RecordingModal({
         Alert.alert(t("error.genericError"), errorMessage, [
           {
             text: t("common.retry"),
-            onPress: () => startRecording(),
+            onPress: () => {
+              setIsProcessing(false);
+              startRecording();
+            },
           },
           {
             text: t("common.cancel"),
@@ -918,27 +937,36 @@ export default function RecordingModal({
    * 保存并关闭
    */
   const handleSaveAndClose = async () => {
+    // ✅ 防止重复调用
+    if (isSavingRef.current) {
+      console.log("⏳ 正在保存中，跳过重复调用");
+      return;
+    }
+
+    isSavingRef.current = true;
+
     try {
       console.log("💾 保存日记...");
 
-      // ✅ 如果用户编辑了内容或标题,先调用后端API更新
-      if (resultDiary && (editedTitle.trim() || editedContent.trim())) {
-        const finalContent =
-          editedContent.trim() || resultDiary.polished_content;
-        const finalTitle = editedTitle.trim() || resultDiary.title;
+      // ✅ 检查是否有修改 - 使用实际值比较（更可靠）
+      if (resultDiary) {
+        const hasTitleChange = isEditingTitle && editedTitle.trim() !== resultDiary.title;
+        const hasContentChange = isEditingContent && editedContent.trim() !== resultDiary.polished_content;
 
-        console.log("📝 更新日记到后端:", resultDiary.diary_id);
-        console.log("  - 标题:", finalTitle);
-        console.log("  - 内容:", finalContent.substring(0, 50) + "...");
+        if (hasTitleChange || hasContentChange) {
+          console.log("📝 更新日记到后端:", resultDiary.diary_id);
+          console.log("  - 标题变化:", hasTitleChange);
+          console.log("  - 内容变化:", hasContentChange);
 
-        await updateDiary(
-          resultDiary.diary_id,
-          finalContent !== resultDiary.polished_content
-            ? finalContent
-            : undefined,
-          finalTitle !== resultDiary.title ? finalTitle : undefined
-        );
-        console.log("✅ 后端更新成功");
+          await updateDiary(
+            resultDiary.diary_id,
+            hasContentChange ? editedContent.trim() : undefined,
+            hasTitleChange ? editedTitle.trim() : undefined
+          );
+          console.log("✅ 后端更新成功");
+        } else {
+          console.log("📝 没有修改，跳过更新");
+        }
       }
 
       // 清理音频
@@ -957,9 +985,13 @@ export default function RecordingModal({
       setIsEditingContent(false);
       setEditedTitle("");
       setEditedContent("");
+      setHasChanges(false);
 
-      // ✅ 显示与列表删除一致风格的轻量 Toast
+      // ✅ 显示成功 Toast
       showToast(t("success.diaryCreated"));
+
+      // ✅ 短暂延迟让用户看到 Toast
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       // 通知父组件刷新列表
       onSuccess();
@@ -969,6 +1001,8 @@ export default function RecordingModal({
         t("error.saveFailed"),
         error.message || t("error.retryMessage")
       );
+    } finally {
+      isSavingRef.current = false;
     }
   };
 
@@ -993,20 +1027,9 @@ export default function RecordingModal({
    */
   const finishEditing = async () => {
     try {
-      // ✅ 更新本地 resultDiary
-      if (isEditingTitle && editedTitle.trim()) {
-        resultDiary.title = editedTitle.trim();
-      }
-      if (isEditingContent && editedContent.trim()) {
-        resultDiary.polished_content = editedContent.trim();
-      }
-
-      setIsEditingTitle(false);
-      setIsEditingContent(false);
-
       console.log("✅ 编辑完成,开始保存...");
 
-      // ✅ 直接保存到后端并关闭
+      // ✅ 直接保存到后端并关闭（handleSaveAndClose会处理实际的API调用）
       await handleSaveAndClose();
     } catch (error) {
       console.error("❌ 保存失败:", error);
@@ -1022,6 +1045,7 @@ export default function RecordingModal({
     setIsEditingContent(false);
     setEditedTitle("");
     setEditedContent("");
+    setHasChanges(false);
     console.log("❌ 取消编辑");
   };
 
@@ -1158,7 +1182,7 @@ export default function RecordingModal({
             </Animated.View>
 
             <Text style={styles.statusText}>
-              {isPaused ? t("diary.pauseRecording") : ""}
+              {isPaused ? t("diary.pauseRecording") : nearLimit ? t("recording.nearLimit") : ""}
             </Text>
 
             <View style={styles.timeRow}>
@@ -1297,8 +1321,11 @@ export default function RecordingModal({
                 <TextInput
                   style={styles.editTitleInput}
                   value={editedTitle}
-                  onChangeText={setEditedTitle}
-                  onBlur={finishEditing}
+                  onChangeText={(text) => {
+                    setEditedTitle(text);
+                    // ✅ 检测标题是否有变化
+                    setHasChanges(text.trim() !== resultDiary.title);
+                  }}
                   autoFocus
                   multiline
                   placeholder={t("diary.placeholderTitle")}
@@ -1320,8 +1347,11 @@ export default function RecordingModal({
                 <TextInput
                   style={styles.editContentInput}
                   value={editedContent}
-                  onChangeText={setEditedContent}
-                  onBlur={finishEditing}
+                  onChangeText={(text) => {
+                    setEditedContent(text);
+                    // ✅ 检测内容是否有变化
+                    setHasChanges(text.trim() !== resultDiary.polished_content);
+                  }}
                   autoFocus
                   multiline
                   placeholder={t("diary.placeholderContent")}
@@ -1510,7 +1540,7 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     ...Typography.body,
-    color: "#999",
+    color: "#D96F4C", // 主题色
   },
   pauseButton: {
     width: 72,

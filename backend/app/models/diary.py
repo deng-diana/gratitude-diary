@@ -13,6 +13,19 @@ class DiaryCreate(BaseModel):
             }
         }
 
+class DiaryUpdate(BaseModel):
+    """编辑日记的请求数据"""
+    content: Optional[str] = Field(None, min_length=1, max_length=5000, description="编辑后的日记内容")
+    title: Optional[str] = Field(None, min_length=1, max_length=100, description="编辑后的标题")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "content": "今天同事帮我解决了一个棘手的bug，还教了我很多调试技巧，非常感激！",
+                "title": "同事的帮助与技术成长"
+            }
+        }
+
 class DiaryResponse(BaseModel):
     """返回给前端的日记数据"""
     diary_id: str = Field(..., description="日记ID")
@@ -20,10 +33,19 @@ class DiaryResponse(BaseModel):
     created_at: str = Field(..., description="创建时间")
     date: str = Field(..., description="日期(YYYY-MM-DD)")
     
+    # ✅ 新增：多语言支持
+    language: str = Field(..., description="检测到的语言代码")
+    title: str = Field(..., description="AI生成的标题")
+    
     original_content: str = Field(..., description="原始内容")
     polished_content: str = Field(..., description="润色后内容")
     ai_feedback: str = Field(..., description="AI反馈")
+    # ✅ 新增：音频相关字段
+    audio_url: Optional[str] = Field(None, description="音频文件S3 URL")
+    audio_duration: Optional[int] = Field(None, description="音频时长(秒)")
     
+
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -31,8 +53,12 @@ class DiaryResponse(BaseModel):
                 "user_id": "user_123",
                 "created_at": "2025-10-08T10:30:00Z",
                 "date": "2025-10-08",
+                "language": "zh",
+                "title": "同事的帮助",
                 "original_content": "今天同事帮我解决了一个bug,很感激他",
                 "polished_content": "今天同事帮我解决了一个棘手的bug,我很感激他的帮助。",
-                "ai_feedback": "能遇到愿意伸出援手的同事真的很幸运呢!🙂"
+                "ai_feedback": "能遇到愿意伸出援手的同事真的很幸运呢!🙂",
+                "audio_url": "https://s3.amazonaws.com/.../audio.m4a",
+                "audio_duration": 45
             }
         }

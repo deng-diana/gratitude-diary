@@ -35,14 +35,7 @@ i18n.defaultLocale = "en";
 // ⚠️ 关键：设置当前语言为英文（在检测之前先设置默认值）
 i18n.locale = "en";
 
-// 🔍 调试：打印翻译数据结构
-console.log("🔍 i18n translations loaded:", {
-  availableLocales: Object.keys(i18n.translations),
-  currentLocale: i18n.locale,
-  defaultLocale: i18n.defaultLocale,
-  sampleEnTranslation: i18n.translations.en?.common?.save,
-  sampleZhTranslation: i18n.translations.zh?.common?.save,
-});
+// 移除了启动时的调试日志
 
 // ============================================================================
 // 3. 语言检测逻辑（智能且健壮）
@@ -72,25 +65,17 @@ function detectAndSetLocale(): void {
         .toLowerCase()
         .split("-")[0];
 
-      console.log("📍 检测到系统语言:", {
-        full: languageTag,
-        code: languageCode,
-        normalizedCode,
-        region: regionCode,
-      });
+      // 移除了语言检测的调试日志
 
       // 匹配我们支持的语言（中文 -> zh，其余 → en）
       if (normalizedCode === "zh") {
         i18n.locale = "zh";
-        console.log("✅ 使用中文界面");
       } else {
         i18n.locale = "en";
-        console.log("✅ 使用英文界面");
       }
     } else {
       // 无法获取系统语言，使用默认
       i18n.locale = "en";
-      console.log("⚠️ 无法检测系统语言，使用英文");
     }
   } catch (error) {
     // 异常处理：确保app不会因为语言检测失败而崩溃
@@ -117,10 +102,7 @@ detectAndSetLocale();
  */
 export const t = (key: string, options?: any): string => {
   const result = i18n.t(key, options);
-  // 🔍 调试：打印当前语言和翻译结果（生产环境可以删除）
-  if (__DEV__) {
-    console.log(`🌍 t('${key}') → locale: ${i18n.locale}, result: ${result}`);
-  }
+  // 移除了调试日志，避免控制台输出过多
   return result;
 };
 
@@ -144,7 +126,6 @@ export const getCurrentLocale = (): string => {
  */
 export const changeLocale = (locale: "en" | "zh"): void => {
   i18n.locale = locale;
-  console.log(`🌍 语言已切换到: ${locale}`);
 };
 
 // 默认导出（支持两种导入方式）

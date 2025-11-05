@@ -242,7 +242,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   cancelButtonText: {
-    fontSize: 16,
-    color: "#666",
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#D96F4C", // 主题色
   },
 });

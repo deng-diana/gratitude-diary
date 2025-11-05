@@ -9,7 +9,7 @@
  */
 import ImageInputIcon from "../assets/icons/addImageIcon.svg";
 import TextInputIcon from "../assets/icons/textInputIcon.svg";
-import { Typography } from "../styles/typography";
+import { Typography, getTypography } from "../styles/typography";
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -129,6 +129,10 @@ export default function DiaryListScreen() {
   // ✅ 添加navigation
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // 获取 Typography 样式（动态字体）
+  const typography = getTypography();
+
   // ========== 状态管理 ==========
 
   // 用户信息
@@ -158,7 +162,9 @@ export default function DiaryListScreen() {
     new Map()
   ); // 当前时间（秒）
   const [duration, setDuration] = useState<Map<string, number>>(new Map()); // 总时长（秒）
+  const [hasPlayedOnce, setHasPlayedOnce] = useState<Set<string>>(new Set()); // 记录哪些音频曾经播放过
   const soundRefs = useRef<Map<string, ExpoAudioPlayer>>(new Map()); // 存储多个音频播放器
+  const intervalRefs = useRef<Map<string, NodeJS.Timeout>>(new Map()); // 存储定时器引用，确保正确清理
 
   // ✅ 新增：Action Sheet 相关状态
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
@@ -197,22 +203,17 @@ export default function DiaryListScreen() {
     setRecordingModalVisible(false);
   };
 
-  const [greeting, setGreeting] = useState(
-    `${t("home.welcome")} — ${t("home.subtitle")} ✨ `
-  );
+  // 分别存储 welcome 和 subtitle
+  const [greetingWelcome, setGreetingWelcome] = useState("");
+  const [greetingSubtitle, setGreetingSubtitle] = useState("");
+  const [userDisplayName, setUserDisplayName] = useState<string | null>(null); // 用于高亮显示的用户名
 
   // ========== 生命周期 ==========
   useEffect(() => {
     loadGreeting();
-  }, []);
+  }, [user]); // 当用户信息变化时重新加载问候语
 
   async function loadGreeting() {
-    // 检查是否首次登录
-    const hasLoggedInBefore = await SecureStore.getItemAsync(
-      "hasLoggedInBefore"
-    );
-    const isFirstTime = !hasLoggedInBefore;
-
     // 检测用户语言
     const locales = Localization.getLocales();
     const userLocale =
@@ -223,12 +224,43 @@ export default function DiaryListScreen() {
 
     console.log("📍 用户语言:", userLocale, "→ 使用:", language);
 
-    // 获取问候语
-    const message = getGreeting(isFirstTime, language);
-    setGreeting(message);
+    // 获取用户姓名（用于替换占位符）
+    let displayName = "";
+    if (user?.name && user.name.length > 0) {
+      // 提取名字（去掉可能的空格和特殊字符，只取第一个词）
+      const firstName = user.name.trim().split(/\s+/)[0];
+      // 如果名字不是从邮箱提取的默认值（长度大于1且不是纯数字），则使用
+      if (firstName.length > 1 && !/^[0-9]+$/.test(firstName)) {
+        displayName = firstName;
+      }
+    }
+
+    // 保存用于高亮显示的用户名
+    setUserDisplayName(displayName || null);
+
+    // 如果没有有效的姓名，使用默认值
+    // 英文用"there"，中文用空字符串（因为中文"Hi"后面可以直接接逗号）
+    if (!displayName) {
+      displayName = language === "zh" ? "" : "there";
+    }
+
+    // 构建welcome：替换welcome中的{name}占位符
+    let welcomeText = t("home.welcome").replace("{name}", displayName);
+
+    // 如果中文且没有姓名，去掉"Hi "后面的空格，直接接逗号
+    if (language === "zh" && !displayName) {
+      welcomeText = welcomeText.replace("Hi ", "Hi");
+    }
+
+    // 分别设置 welcome 和 subtitle
+    setGreetingWelcome(welcomeText);
+    setGreetingSubtitle(t("home.subtitle"));
 
     // 标记已登录过
-    if (isFirstTime) {
+    const hasLoggedInBefore = await SecureStore.getItemAsync(
+      "hasLoggedInBefore"
+    );
+    if (!hasLoggedInBefore) {
       await SecureStore.setItemAsync("hasLoggedInBefore", "true");
     }
   }
@@ -240,6 +272,26 @@ export default function DiaryListScreen() {
    */
   useEffect(() => {
     loadData();
+
+    // 组件卸载时清理所有定时器和播放器
+    return () => {
+      // 清理所有定时器
+      intervalRefs.current.forEach((intervalId) => {
+        clearInterval(intervalId);
+      });
+      intervalRefs.current.clear();
+
+      // 清理所有播放器
+      soundRefs.current.forEach((player) => {
+        try {
+          player.pause();
+          player.remove();
+        } catch (e) {
+          // 忽略清理错误
+        }
+      });
+      soundRefs.current.clear();
+    };
   }, []);
 
   /**
@@ -409,8 +461,14 @@ export default function DiaryListScreen() {
    */
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+    try {
+      await loadData();
+    } catch (error: any) {
+      console.error("❌ 下拉刷新失败:", error);
+      // 静默处理错误，不显示额外的错误提示（loadDiaries 已经处理了）
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // ===== 录音相关函数 =====
@@ -572,6 +630,14 @@ export default function DiaryListScreen() {
         if (sound) {
           sound.pause(); // expo-audio 的 pause() 是同步方法
           setCurrentPlayingId(null);
+          
+          // 清理定时器
+          const intervalId = intervalRefs.current.get(diary.diary_id);
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalRefs.current.delete(diary.diary_id);
+          }
+          
           console.log("⏸ 已暂停");
         }
         return;
@@ -585,91 +651,186 @@ export default function DiaryListScreen() {
           oldSound.remove(); // expo-audio 使用 remove() 清理
           soundRefs.current.delete(currentPlayingId);
 
+          // 清理旧音频的定时器
+          const oldIntervalId = intervalRefs.current.get(currentPlayingId);
+          if (oldIntervalId) {
+            clearInterval(oldIntervalId);
+            intervalRefs.current.delete(currentPlayingId);
+          }
+
           // 清理旧音频的状态（保持进度用于恢复播放）
           // 注意：不删除progress，用户可能想继续播放
         }
       }
 
-      console.log("🎵 创建音频播放器:", diary.audio_url);
+      // 检查是否已有播放器（恢复播放）
+      const existingPlayer = soundRefs.current.get(diary.diary_id);
+      let player: ExpoAudioPlayer;
+      let isResuming = false;
 
-      // 使用 createAudioPlayer 创建播放器（自动加载并准备音频）
-      const player = createAudioPlayer(diary.audio_url!, {
-        updateInterval: 100, // 每100ms更新一次状态
-      });
+      if (existingPlayer && existingPlayer.isLoaded) {
+        // 恢复播放：使用已有的播放器
+        player = existingPlayer;
+        isResuming = true;
+        console.log("🔄 恢复播放音频:", diary.diary_id);
+      } else {
+        // 新播放：创建新的播放器
+        console.log("🎵 创建音频播放器:", diary.audio_url);
+        player = createAudioPlayer(diary.audio_url!, {
+          updateInterval: 100, // 每100ms更新一次状态
+        });
+        soundRefs.current.set(diary.diary_id, player);
+        
+        // 标记为已播放过
+        setHasPlayedOnce((prev) => {
+          const newSet = new Set(prev);
+          newSet.add(diary.diary_id);
+          return newSet;
+        });
+      }
 
-      // expo-audio 会自动加载音频，直接播放即可
-      // 如果音频未加载完成，play() 会自动等待
+      // 播放音频
       player.play();
 
-      console.log("✅ 音频播放器创建成功");
+      console.log("✅ 音频播放器准备完成");
 
-      soundRefs.current.set(diary.diary_id, player);
       setCurrentPlayingId(diary.diary_id);
 
-      // 监听播放状态更新
+      // 初始化：立即设置 duration（优先使用数据库中的audio_duration，如果player已加载则使用player的duration）
+      const initialDuration = player.isLoaded && player.duration > 0 
+        ? Math.floor(player.duration)
+        : (diary.audio_duration || 0);
+      
+      if (initialDuration > 0) {
+        setDuration((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(diary.diary_id, initialDuration);
+          return newMap;
+        });
+      }
+
+      // 初始化当前时间：如果是恢复播放，保持之前的currentTime；如果是新播放，从0开始
+      if (!isResuming) {
+        setCurrentTime((prev) => {
+          const newMap = new Map(prev);
+          // 如果之前没有记录，则从0开始
+          if (!newMap.has(diary.diary_id)) {
+            newMap.set(diary.diary_id, 0);
+          }
+          return newMap;
+        });
+      }
+
+      // 监听播放状态更新（优化：只在播放时更新，减少不必要的状态更新）
+      // 使用闭包变量保存上次更新的时间，避免不必要的状态更新
+      let lastUpdateTime = 0;
+      
       const updateProgress = () => {
-        if (player.isLoaded) {
-          // expo-audio 的 currentTime 和 duration 已经是秒为单位
-          const currentTimeSeconds = Math.floor(player.currentTime);
-          const durationSeconds = Math.floor(player.duration);
+        if (!player.isLoaded) {
+          // 如果player还未加载，尝试设置duration
+          const currentDuration = diary.audio_duration || 0;
+          if (currentDuration > 0) {
+            setDuration((prev) => {
+              const newMap = new Map(prev);
+              const existing = newMap.get(diary.diary_id) || 0;
+              if (existing === 0) {
+                newMap.set(diary.diary_id, currentDuration);
+                return newMap;
+              }
+              return prev; // 避免不必要的更新
+            });
+          }
+          return;
+        }
 
+        // expo-audio 的 currentTime 和 duration 已经是秒为单位
+        const currentTimeSeconds = Math.floor(player.currentTime);
+        const durationSeconds = Math.floor(player.duration);
+
+        // 只在时间变化时更新（减少不必要的渲染和闪烁）
+        if (currentTimeSeconds !== lastUpdateTime) {
+          lastUpdateTime = currentTimeSeconds;
+          
           setCurrentTime((prev) => {
-            const newMap = new Map(prev);
-            newMap.set(diary.diary_id, currentTimeSeconds);
-            return newMap;
+            const existing = prev.get(diary.diary_id) || 0;
+            // 只在时间真的变化时更新（避免小数秒的抖动）
+            if (Math.abs(existing - currentTimeSeconds) >= 1) {
+              const newMap = new Map(prev);
+              newMap.set(diary.diary_id, currentTimeSeconds);
+              return newMap;
+            }
+            return prev; // 避免不必要的更新
           });
+        }
 
+        // 更新总时长（只在变化时更新）
+        if (durationSeconds > 0) {
           setDuration((prev) => {
-            const newMap = new Map(prev);
-            newMap.set(diary.diary_id, durationSeconds);
-            return newMap;
+            const existing = prev.get(diary.diary_id) || 0;
+            if (existing !== durationSeconds) {
+              const newMap = new Map(prev);
+              newMap.set(diary.diary_id, durationSeconds);
+              return newMap;
+            }
+            return prev; // 避免不必要的更新
           });
         }
       };
 
       // 定期更新进度并检查播放状态
+      const currentDiaryId = diary.diary_id; // 保存当前diary_id到闭包
+      
+      // 清理之前的定时器（如果存在）
+      const existingInterval = intervalRefs.current.get(currentDiaryId);
+      if (existingInterval) {
+        clearInterval(existingInterval);
+      }
+      
       const progressInterval = setInterval(() => {
-        if (currentPlayingId !== diary.diary_id) {
-          // 如果切换了音频，清理这个定时器
+        // 检查当前播放的音频是否还是这个
+        if (!soundRefs.current.has(currentDiaryId)) {
           clearInterval(progressInterval);
+          intervalRefs.current.delete(currentDiaryId);
           return;
         }
 
-        if (player.isLoaded) {
-          // 更新进度
-          if (player.playing && !player.paused) {
-            updateProgress();
-          }
+        // 只在播放时更新进度
+        const currentPlayer = soundRefs.current.get(currentDiaryId);
+        if (currentPlayer && currentPlayer.playing && !currentPlayer.paused) {
+          updateProgress();
+        }
 
-          // 检查是否播放完成
-          // expo-audio 的 currentTime 和 duration 是秒为单位
-          if (
+        // 检查是否播放完成
+        if (player.isLoaded && 
             !player.playing &&
             player.currentTime > 0 &&
             player.duration > 0 &&
-            Math.abs(player.currentTime - player.duration) < 0.5 // 允许0.5秒误差
-          ) {
-            clearInterval(progressInterval);
-            setCurrentPlayingId(null);
-            soundRefs.current.delete(diary.diary_id);
-            player.remove();
+            Math.abs(player.currentTime - player.duration) < 0.5) {
+          clearInterval(progressInterval);
+          intervalRefs.current.delete(currentDiaryId);
+          
+          setCurrentPlayingId((prev) => prev === currentDiaryId ? null : prev);
+          soundRefs.current.delete(currentDiaryId);
+          player.remove();
 
-            // 重置状态
-            setCurrentTime((prev) => {
-              const newMap = new Map(prev);
-              newMap.delete(diary.diary_id);
-              return newMap;
-            });
-            setDuration((prev) => {
-              const newMap = new Map(prev);
-              newMap.delete(diary.diary_id);
-              return newMap;
-            });
+          // 重置状态（播放完成后）
+          setCurrentTime((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(currentDiaryId);
+            return newMap;
+          });
+          setDuration((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(currentDiaryId);
+            return newMap;
+          });
 
-            console.log("✅ 播放完成");
-          }
+          console.log("✅ 播放完成");
         }
       }, 100); // 每100ms更新一次
+      
+      // 保存定时器引用
+      intervalRefs.current.set(currentDiaryId, progressInterval);
 
       console.log("🎵 开始播放音频:", diary.diary_id);
     } catch (error: any) {
@@ -700,7 +861,7 @@ export default function DiaryListScreen() {
     setTimeout(() => setToastVisible(false), 1500);
   };
 
-  type DiaryAction = "edit" | "copyEntry" | "delete";
+  type DiaryAction = "copyEntry" | "delete";
 
   const handleAction = (action: DiaryAction) => {
     setActionSheetVisible(false);
@@ -708,9 +869,6 @@ export default function DiaryListScreen() {
     if (!selectedDiary) return;
 
     switch (action) {
-      case "edit":
-        Alert.alert(t("confirm.hint"), t("home.editUnavailable"));
-        break;
       case "copyEntry":
         Alert.alert(t("confirm.hint"), t("home.copyUnavailable"));
         break;
@@ -776,19 +934,6 @@ export default function DiaryListScreen() {
             ]}
           >
             {/* 操作列表 */}
-            <TouchableOpacity
-              style={styles.actionSheetItem}
-              onPress={() => handleAction("edit")}
-            >
-              <Ionicons
-                name="create-outline"
-                size={20}
-                color="#333"
-                style={styles.actionIcon}
-              />
-              <Text style={styles.actionText}>{t("home.editEntry")}</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.actionSheetItem}
               onPress={() => handleAction("copyEntry")}
@@ -876,16 +1021,22 @@ export default function DiaryListScreen() {
               />
             ) : (
               <View style={styles.profileMenuInitial}>
-                <Text style={styles.profileMenuInitialText}>
+                <Text style={[styles.profileMenuInitialText, typography.body]}>
                   {getUserInitial(user?.name, user?.email)}
                 </Text>
               </View>
             )}
             <View style={styles.profileMenuInfo}>
-              <Text style={styles.profileMenuName} numberOfLines={1}>
+              <Text
+                style={[styles.profileMenuName, typography.body]}
+                numberOfLines={1}
+              >
                 {user?.name || t("home.anonymousUser")}
               </Text>
-              <Text style={styles.profileMenuEmail} numberOfLines={1}>
+              <Text
+                style={[styles.profileMenuEmail, typography.caption]}
+                numberOfLines={1}
+              >
                 {user?.email || ""}
               </Text>
             </View>
@@ -900,7 +1051,7 @@ export default function DiaryListScreen() {
             onPress={handleSignOut}
           >
             <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
-            <Text style={styles.profileMenuItemTextDanger}>
+            <Text style={[styles.profileMenuItemTextDanger, typography.body]}>
               {t("home.signOut")}
             </Text>
           </TouchableOpacity>
@@ -919,8 +1070,29 @@ export default function DiaryListScreen() {
       <View style={styles.topBar}>
         {/* 问候语 */}
         <View style={styles.greetingContainer}>
-          <Text style={styles.greetingBold}>{t("home.welcome")}</Text>
-          <Text style={styles.greetingLight}>{t("home.subtitle")}</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline" }}>
+            {userDisplayName && greetingWelcome.includes(userDisplayName) ? (
+              // 如果包含用户名，拆分显示以高亮name
+              (() => {
+                const parts = greetingWelcome.split(userDisplayName);
+                return (
+                  <>
+                    {parts.map((part, index) => (
+                      <React.Fragment key={index}>
+                        {part && <Text style={styles.greetingBold}>{part}</Text>}
+                        {index < parts.length - 1 && (
+                          <Text style={styles.greetingBoldHighlight}>{userDisplayName}</Text>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </>
+                );
+              })()
+            ) : (
+              <Text style={styles.greetingBold}>{greetingWelcome}</Text>
+            )}
+          </View>
+          <Text style={styles.greetingLight}>{greetingSubtitle}</Text>
         </View>
 
         {/* 用户头像按钮 */}
@@ -937,7 +1109,7 @@ export default function DiaryListScreen() {
           ) : (
             // Apple用户或无头像:显示首字母
             <View style={styles.profileInitial}>
-              <Text style={styles.initialText}>
+              <Text style={[styles.initialText, typography.body]}>
                 {getUserInitial(user?.name, user?.email)}
               </Text>
             </View>
@@ -945,8 +1117,10 @@ export default function DiaryListScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 我的日记标题 */}
-      <Text style={styles.sectionTitle}>{t("home.myDiary")}</Text>
+      {/* 我的日记标题 - 仅在列表不为空时显示 */}
+      {diaries.length > 0 && (
+        <Text style={styles.sectionTitle}>{t("home.myDiary")}</Text>
+      )}
     </View>
   );
 
@@ -1008,6 +1182,7 @@ export default function DiaryListScreen() {
           totalDuration={
             duration.get(item.diary_id) || item.audio_duration || 0
           }
+          hasPlayedOnce={hasPlayedOnce.has(item.diary_id)}
           onPlayPress={() => handlePlayAudio(item)}
           style={styles.audioButton}
         />
@@ -1265,7 +1440,7 @@ const styles = StyleSheet.create({
 
   greetingContainer: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 20,
   },
 
   greetingBold: {
@@ -1274,8 +1449,15 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 
+  greetingBoldHighlight: {
+    ...Typography.diaryTitle,
+    color: "#D96F4C", // 主题色高亮
+    marginBottom: 2,
+  },
+
   greetingLight: {
     ...Typography.caption,
+    fontSize: 15,
     color: "#666",
   },
 
@@ -1295,16 +1477,16 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#FFEBF1", // 浅粉色背景
+    backgroundColor: "#F7DFC6", // 浅粉色背景
     borderWidth: 1,
-    borderColor: "#FF98BA", // 描边颜色
+    borderColor: "#F2CEAA", // 描边颜色
     alignItems: "center",
     justifyContent: "center",
   },
 
   initialText: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: "900", // 最粗字体
     color: "#D96F4C", // 品牌色文字
   },
   // ===== 标题 =====
@@ -1385,6 +1567,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 80,
     paddingHorizontal: 40,
+    marginTop: 40,
   },
 
   emptyIcon: {
@@ -1394,9 +1577,9 @@ const styles = StyleSheet.create({
 
   emptyTitle: {
     ...Typography.diaryTitle,
-    fontSize: 20,
+    fontSize: 18,
     color: "#1A1A1A",
-    marginBottom: 8,
+    marginBottom: 6,
   },
 
   emptyText: {
@@ -1558,7 +1741,7 @@ const styles = StyleSheet.create({
   },
 
   cancelButton: {
-    backgroundColor: "#F5F5F5",
+    backgroundColor: "#F0F0F0",
     borderRadius: 12,
     padding: 16,
     marginHorizontal: 20,
@@ -1568,9 +1751,9 @@ const styles = StyleSheet.create({
 
   cancelText: {
     ...Typography.body,
-    fontSize: 16,
+    fontSize: 17, // iOS 系统默认字号
     fontWeight: "600",
-    color: "#1A1A1A",
+    color: "#D96F4C", // 主题色
   },
 
   // ===== Toast（iOS）=====
@@ -1688,22 +1871,22 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 30,
-    backgroundColor: "#FFEBF1", // 浅粉色背景
+    backgroundColor: "#F7DFC6", // 浅粉色背景
     borderWidth: 1,
-    borderColor: "#FF98BA", // 描边颜色
+    borderColor: "#F2CEAA", // 描边颜色
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: 10,
   },
 
   profileMenuInitialText: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "900", // 最粗字体
     color: "#D96F4C", // 品牌色文字
   },
 
   profileMenuName: {
-    fontSize: 17,
+    fontSize: 19, // 17 + 2 = 19
     fontWeight: "600",
     color: "#1A1A1A",
     marginBottom: 4,
@@ -1711,7 +1894,7 @@ const styles = StyleSheet.create({
   },
 
   profileMenuEmail: {
-    fontSize: 13,
+    fontSize: 15, // 13 + 2 = 15
     color: "#666",
     overflow: "hidden",
   },
@@ -1730,7 +1913,7 @@ const styles = StyleSheet.create({
   },
 
   profileMenuItemTextDanger: {
-    fontSize: 16,
+    fontSize: 18, // 16 + 2 = 18
     color: "#FF3B30",
     marginLeft: 12,
   },
