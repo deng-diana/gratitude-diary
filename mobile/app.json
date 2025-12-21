@@ -22,7 +22,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "We need microphone access for voice journaling.",
         "NSFaceIDUsageDescription": "Use Face ID to sign in quickly.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {

@@ -1,0 +1,81 @@
+name: Build Mobile App
+
+# 触发条件：当 mobile/ 目录下的文件有变更时触发
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/deploy-mobile.yml'
+
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'ios'
+        type: choice
+        options:
+          - ios
+          - android
+          - both
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.platform || 'iOS' }} App
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步骤 1: 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤 2: 设置 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      # 步骤 3: 安装依赖
+      - name: Install dependencies
+        working-directory: ./mobile
+        run: npm ci
+
+      # 步骤 4: 运行预构建检查
+      - name: Run pre-build check
+        working-directory: ./mobile
+        run: npm run pre-build-check
+
+      # 步骤 5: 安装 EAS CLI
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      # 步骤 6: 登录 Expo（需要配置 EXPO_TOKEN）
+      - name: Login to Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # 步骤 7: 构建应用（根据输入选择平台）
+      - name: Build iOS App
+        if: github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'both' || (github.event.inputs.platform == '' && github.event_name == 'push')
+        working-directory: ./mobile
+        run: eas build --platform ios --non-interactive
+
+      - name: Build Android App
+        if: github.event.inputs.platform == 'android' || github.event.inputs.platform == 'both'
+        working-directory: ./mobile
+        run: eas build --platform android --non-interactive
+
+      # 步骤 8: 构建完成通知
+      - name: Build success
+        run: |
+          echo "✅ 构建成功！"
+          echo "平台: ${{ github.event.inputs.platform || 'iOS' }}"
+

@@ -8,6 +8,10 @@
  */
 import { ActivityIndicator } from "react-native";
 import { Audio } from "expo-av";
+import {
+  activateKeepAwakeAsync,
+  deactivateKeepAwake,
+} from "expo-keep-awake";
 import { Alert } from "react-native";
 import { createVoiceDiary } from "../services/diaryService";
 import { updateDiary } from "../services/diaryService";
@@ -55,6 +59,8 @@ export default function RecordingModal({
   onCancel,
   onDiscard,
 }: RecordingModalProps) {
+  const KEEP_AWAKE_TAG = "recording-modal-session";
+
   // ✅ 动画值
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const waveAnim1 = useRef(new Animated.Value(0)).current;
@@ -195,6 +201,43 @@ export default function RecordingModal({
 
   // ✅ 新增:保存状态保护 - 防止重复调用
   const isSavingRef = useRef(false);
+
+  /**
+   * 🎚️ 统一管理录音音频模式
+   * - 录音时保持音频会话在后台活跃
+   * - 结束后及时恢复，避免占用系统资源
+   */
+  const configureRecordingAudioMode = useCallback(async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+        interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error("配置录音音频模式失败:", error);
+    }
+  }, []);
+
+  const resetAudioModeAsync = useCallback(async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+        interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error("恢复音频模式失败:", error);
+    }
+  }, []);
 
   // ✅ 轻量 Toast（与删除成功保持一致样式）
   const [toastVisible, setToastVisible] = useState(false);
@@ -399,6 +442,10 @@ export default function RecordingModal({
       startedAtRef.current = null;
 
       console.log("❌ 录音已取消");
+      await resetAudioModeAsync();
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (_) {}
       onCancel();
       if (shouldDelete) {
         onDiscard?.();
@@ -411,6 +458,10 @@ export default function RecordingModal({
       setIsPaused(false);
       setDuration(0);
       isStartingRef.current = false;
+      await resetAudioModeAsync();
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (_) {}
       onCancel();
     }
   }
@@ -466,6 +517,31 @@ export default function RecordingModal({
     }
   }, [visible]);
 
+  // ✅ 录音时保持屏幕常亮，防止自动锁屏导致录音中断
+  useEffect(() => {
+    const manageKeepAwake = async () => {
+      try {
+        if (visible && !showResult && (isRecording || isPaused)) {
+          await activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+        } else {
+          await deactivateKeepAwake(KEEP_AWAKE_TAG);
+        }
+      } catch (error) {
+        console.log("KeepAwake 控制失败:", error);
+      }
+    };
+
+    manageKeepAwake();
+
+    return () => {
+      void (async () => {
+        try {
+          await deactivateKeepAwake(KEEP_AWAKE_TAG);
+        } catch (_) {}
+      })();
+    };
+  }, [visible, showResult, isRecording, isPaused]);
+
   useEffect(() => {
     if (!visible && pendingDiaryId && !hasSavedPendingDiary) {
       (async () => {
@@ -505,6 +581,11 @@ export default function RecordingModal({
             clearInterval(resultProgressIntervalRef.current);
             resultProgressIntervalRef.current = null;
           }
+
+          await resetAudioModeAsync();
+          try {
+            await deactivateKeepAwake(KEEP_AWAKE_TAG);
+          } catch (_) {}
         } catch (_) {}
       })();
 
@@ -565,13 +646,7 @@ export default function RecordingModal({
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
+      await configureRecordingAudioMode();
 
       console.log("🎤 开始录音...");
       const { recording: newRecording } = await Audio.Recording.createAsync({
@@ -701,6 +776,7 @@ export default function RecordingModal({
         return;
       }
 
+      await configureRecordingAudioMode();
       await recordingRef.current.startAsync();
       setIsPaused(false);
 
@@ -774,6 +850,10 @@ export default function RecordingModal({
       // 停止录音
       await recordingRef.current.stopAndUnloadAsync();
       recordingRef.current = null;
+      await resetAudioModeAsync();
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (_) {}
 
       const recordedDuration = Math.floor(duration);
       console.log("录音时长:", recordedDuration, "秒");
@@ -1181,6 +1261,10 @@ export default function RecordingModal({
       );
     } finally {
       isSavingRef.current = false;
+      await resetAudioModeAsync();
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (_) {}
     }
   };
 

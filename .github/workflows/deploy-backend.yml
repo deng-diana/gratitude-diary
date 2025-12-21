@@ -1,0 +1,84 @@
+name: Deploy Backend to AWS Lambda
+
+# 触发条件：当 backend/ 目录下的文件有变更时触发
+on:
+  push:
+    branches:
+      - master  # 主分支
+      - main    # 如果使用 main 分支
+    paths:
+      - 'backend/**'  # 只监听 backend 目录的变更
+      - '.github/workflows/deploy-backend.yml'  # 工作流文件本身变更也触发
+
+  # 也可以手动触发（在 GitHub Actions 页面点击 "Run workflow"）
+  workflow_dispatch:
+
+# 环境变量（从 GitHub Secrets 读取）
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO_NAME: gratitude-diary
+  LAMBDA_FUNCTION_NAME: gratitude-diary-api
+
+jobs:
+  deploy:
+    name: Build and Deploy to Lambda
+    runs-on: ubuntu-latest  # 使用 Ubuntu 虚拟机运行
+
+    steps:
+      # 步骤 1: 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 步骤 2: 配置 AWS 凭证
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 步骤 3: 登录到 Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 步骤 4: 构建 Docker 镜像
+      - name: Build Docker image
+        working-directory: ./backend
+        run: |
+          docker build -t ${{ env.ECR_REPO_NAME }}:latest .
+
+      # 步骤 5: 给镜像打标签
+      - name: Tag Docker image
+        run: |
+          docker tag ${{ env.ECR_REPO_NAME }}:latest \
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest
+
+      # 步骤 6: 推送镜像到 ECR
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest
+
+      # 步骤 7: 更新 Lambda 函数
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --image-uri ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest \
+            --region ${{ env.AWS_REGION }}
+
+      # 步骤 8: 等待 Lambda 更新完成
+      - name: Wait for Lambda update
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      # 步骤 9: 部署成功通知（可选）
+      - name: Deployment success
+        run: |
+          echo "✅ 部署成功！"
+          echo "Lambda 函数: ${{ env.LAMBDA_FUNCTION_NAME }}"
+          echo "镜像: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO_NAME }}:latest"
+

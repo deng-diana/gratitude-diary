@@ -37,7 +37,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 // 🛠️ 开发模式：始终显示Onboarding（方便测试和调试）
 // ⚠️ 生产环境需保持为 false，避免老用户反复进入欢迎页
 // 🛠️ 开发模式开关：保持为 false，生产环境下只在首次安装时展示欢迎页
-const DEV_MODE_FORCE_ONBOARDING = false;
+const DEV_MODE_FORCE_ONBOARDING = true;
 
 export default function AppNavigator() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -127,7 +127,10 @@ export default function AppNavigator() {
 
   // 显示加载状态，直到确定所有状态
   // 🛠️ 开发模式下，直接显示WelcomeScreen，减少闪屏感
-  if (!DEV_MODE_FORCE_ONBOARDING && (isAuthenticated === null || hasCompletedOnboarding === null)) {
+  if (
+    !DEV_MODE_FORCE_ONBOARDING &&
+    (isAuthenticated === null || hasCompletedOnboarding === null)
+  ) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#E56C45" />
@@ -145,7 +148,10 @@ export default function AppNavigator() {
       >
         {/* Onboarding流程 */}
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
-        <Stack.Screen name="OnboardingCarousel" component={OnboardingCarousel} />
+        <Stack.Screen
+          name="OnboardingCarousel"
+          component={OnboardingCarousel}
+        />
         {/* 保留旧的单个屏幕路由，用于向后兼容 */}
         <Stack.Screen name="Onboarding1" component={OnboardingScreen1} />
         <Stack.Screen name="Onboarding2" component={OnboardingScreen2} />
