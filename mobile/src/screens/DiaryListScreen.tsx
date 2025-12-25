@@ -46,6 +46,7 @@ import * as SecureStore from "expo-secure-store";
 import RecordingModal from "../components/RecordingModal";
 import TextInputModal from "../components/TextInputModal";
 import { ImagePickerModal } from "../components/ImagePickerModal";
+import ImageDiaryModal from "../components/ImageDiaryModal";
 
 // ============================================================================
 // 🌍 导入翻译函数
@@ -151,6 +152,9 @@ export default function DiaryListScreen() {
   const [textInputModalVisible, setTextInputModalVisible] = useState(false);
   // ✅ 新增:图片选择Modal状态
   const [imagePickerModalVisible, setImagePickerModalVisible] = useState(false);
+  // ✅ 新增:图片日记Modal状态
+  const [imageDiaryModalVisible, setImageDiaryModalVisible] = useState(false);
+  const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]);
 
   // ✅ 录音计时器相关状态
   const [isRecording, setIsRecording] = useState(false);
@@ -580,16 +584,32 @@ export default function DiaryListScreen() {
   };
 
   /**
-   * 图片选择完成回调
+   * 图片选择完成回调 - 打开图片日记Modal
    */
   const handleImagesSelected = async (imageUris: string[]) => {
     console.log("📸 用户选择了图片:", imageUris);
-    Alert.alert(
-      "功能提示",
-      `你选择了${imageUris.length}张图片。\n\n接下来将实现：\n1. 上传图片到S3\n2. 显示预览\n3. 可以继续添加语音或文字`,
-      [{ text: "好的" }]
-    );
-    // TODO: 实现上传到S3和后续流程
+    setSelectedImageUris(imageUris);
+    setImagePickerModalVisible(false); // 关闭选择器
+    setImageDiaryModalVisible(true); // 打开日记Modal
+  };
+
+  /**
+   * 图片日记创建成功
+   */
+  const handleImageDiarySuccess = () => {
+    console.log("✅ 图片上传成功，刷新列表");
+    setImageDiaryModalVisible(false);
+    setSelectedImageUris([]);
+    loadDiaries(); // 刷新日记列表
+  };
+
+  /**
+   * 图片日记取消
+   */
+  const handleImageDiaryCancel = () => {
+    console.log("❌ 取消图片日记");
+    setImageDiaryModalVisible(false);
+    setSelectedImageUris([]);
   };
 
   /**
@@ -1582,6 +1602,15 @@ export default function DiaryListScreen() {
         visible={imagePickerModalVisible}
         onClose={() => setImagePickerModalVisible(false)}
         onImagesSelected={handleImagesSelected}
+        maxImages={9}
+      />
+
+      {/* ✅ 新增:图片日记Modal */}
+      <ImageDiaryModal
+        visible={imageDiaryModalVisible}
+        initialImages={selectedImageUris}
+        onSuccess={handleImageDiarySuccess}
+        onCancel={handleImageDiaryCancel}
         maxImages={9}
       />
 
