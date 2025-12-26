@@ -1,16 +1,10 @@
 /**
- * 图片日记 Modal 组件
- *
- * 设计理念：与 RecordingModal 和 TextInputModal 保持一致
- *
- * 功能：
- * 1. 显示已选择的图片缩略图（顶部）
- * 2. 底部工具栏：继续添加图片、语音、文字
- * 3. 支持删除图片
- * 4. 最终上传并创建日记
+ * 图片日记 Modal - 极简设计
+ * 
+ * 功能：选择图片 → 显示预览 → 添加语音/文字（可选）→ 保存
  */
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -28,78 +22,115 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { createImageOnlyDiary } from "../services/diaryService";
 
-// 导入图标
-import ImageInputIcon from "../assets/icons/addImageIcon.svg";
-import TextInputIcon from "../assets/icons/textInputIcon.svg";
-
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const THUMBNAIL_SIZE = (SCREEN_WIDTH - 80) / 3; // 3列，留出边距
+const THUMBNAIL_SIZE = (SCREEN_WIDTH - 80) / 3; // 3列
 
 interface ImageDiaryModalProps {
   visible: boolean;
-  initialImages: string[]; // 初始选择的图片
-  onSuccess: () => void; // 成功创建日记后的回调
-  onCancel: () => void; // 取消回调
-  maxImages?: number; // 最多选择多少张，默认9张
+  onClose: () => void;
+  onSuccess: () => void;
+  maxImages?: number;
 }
 
 export default function ImageDiaryModal({
   visible,
-  initialImages,
+  onClose,
   onSuccess,
-  onCancel,
   maxImages = 9,
 }: ImageDiaryModalProps) {
-  // ========== 状态管理 ==========
-  const [selectedImages, setSelectedImages] = useState<string[]>(initialImages);
-  const [isSaving, setIsSaving] = useState(false); // 保存中状态
+  const [images, setImages] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showPicker, setShowPicker] = useState(false); // 显示底部选择器
+  const [showConfirmModal, setShowConfirmModal] = useState(false); // 显示确认弹窗
 
-  // ========== 重置状态（Modal 关闭时） ==========
-  const resetState = () => {
-    setSelectedImages(initialImages);
-    setIsSaving(false);
-  };
+  // Modal 打开时，显示底部选择器
+  useEffect(() => {
+    if (visible && images.length === 0) {
+      setShowPicker(true);
+    }
+  }, [visible]);
 
-  // ========== 图片操作 ==========
+  // 拍照
+  const handleTakePhoto = async () => {
+    setShowPicker(false); // 关闭选择器
+    
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("需要相机权限", "请在设置中允许访问相机");
+        onClose();
+        return;
+      }
 
-  /**
-   * 删除图片
-   */
-  const handleRemoveImage = (index: number) => {
-    const newImages = [...selectedImages];
-    newImages.splice(index, 1);
-    setSelectedImages(newImages);
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.8,
+      });
 
-    // 如果删除后没有图片了，关闭 Modal
-    if (newImages.length === 0) {
-      Alert.alert("提示", "至少需要一张图片", [
-        {
-          text: "取消",
-          onPress: handleCancel,
-          style: "cancel",
-        },
-        {
-          text: "重新选择",
-          onPress: handleAddMoreImages,
-        },
-      ]);
+      if (result.canceled || !result.assets?.[0]?.uri) {
+        onClose();
+        return;
+      }
+
+      setImages([result.assets[0].uri]);
+    } catch (error) {
+      console.error("拍照失败:", error);
+      Alert.alert("拍照失败", "请重试");
+      onClose();
     }
   };
 
-  /**
-   * 添加更多图片
-   */
-  const handleAddMoreImages = async () => {
-    const remainingSlots = maxImages - selectedImages.length;
-    if (remainingSlots <= 0) {
+  // 从相册选择
+  const handlePickFromGallery = async () => {
+    setShowPicker(false); // 关闭选择器
+    
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("需要相册权限", "请在设置中允许访问相册");
+        onClose();
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        selectionLimit: maxImages,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        onClose();
+        return;
+      }
+
+      const uris = result.assets.map((asset) => asset.uri);
+      setImages(uris);
+    } catch (error) {
+      console.error("选择图片失败:", error);
+      Alert.alert("选择失败", "请重试");
+      onClose();
+    }
+  };
+
+  // 取消选择
+  const handlePickerCancel = () => {
+    setShowPicker(false);
+    setImages([]);
+    onClose();
+  };
+
+  // 添加更多图片
+  const handleAddMore = async () => {
+    const remaining = maxImages - images.length;
+    if (remaining <= 0) {
       Alert.alert("提示", `最多只能选择${maxImages}张图片`);
       return;
     }
 
     try {
-      // 请求相册权限
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("需要相册权限", "请在设置中允许访问相册");
         return;
@@ -109,381 +140,409 @@ export default function ImageDiaryModal({
         mediaTypes: ["images"],
         allowsMultipleSelection: true,
         quality: 0.8,
-        selectionLimit: remainingSlots,
+        selectionLimit: remaining,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const newImages = result.assets.map((asset) => asset.uri);
-        setSelectedImages([...selectedImages, ...newImages]);
+      if (!result.canceled && result.assets?.length) {
+        const newUris = result.assets.map((asset) => asset.uri);
+        setImages([...images, ...newUris]);
       }
     } catch (error) {
-      console.error("选择图片失败:", error);
-      Alert.alert("选择失败", "请重试");
+      console.error("添加图片失败:", error);
+      Alert.alert("添加失败", "请重试");
     }
   };
 
-  /**
-   * 打开录音 Modal
-   * TODO: 实现与 RecordingModal 的集成
-   */
-  const handleAddVoice = () => {
-    Alert.alert("功能开发中", "即将支持图片+语音混合日记");
+  // 删除图片
+  const handleRemoveImage = (index: number) => {
+    const newImages = images.filter((_, i) => i !== index);
+    if (newImages.length === 0) {
+      Alert.alert("提示", "至少需要一张图片", [
+        { text: "取消", onPress: onClose, style: "cancel" },
+        { text: "重新选择", onPress: () => setShowPicker(true) },
+      ]);
+    } else {
+      setImages(newImages);
+    }
   };
 
-  /**
-   * 打开文字输入
-   * TODO: 实现与 TextInputModal 的集成
-   */
-  const handleAddText = () => {
-    Alert.alert("功能开发中", "即将支持图片+文字混合日记");
-  };
-
-  /**
-   * 取消并关闭
-   */
-  const handleCancel = () => {
-    resetState();
-    onCancel();
-  };
-
-  /**
-   * 完成 - 引导用户添加更多内容，或直接保存纯图片日记
-   *
-   * 设计理念：温柔引导，而非强制
-   * - 允许用户只发图片（尊重用户选择）
-   * - 鼓励用户留下一些话（让记录更有意义）
-   */
-  const handleComplete = () => {
-    if (selectedImages.length === 0) {
+  // 保存纯图片日记
+  const handleSave = async () => {
+    if (images.length === 0) {
       Alert.alert("提示", "请至少选择一张图片");
       return;
     }
 
-    if (isSaving) {
-      return; // 正在保存时不响应
-    }
-
-    // 温柔的引导提示
-    Alert.alert(
-      "留下这一刻的故事 ✨",
-      "要不要用几句话或一段语音，记录此刻的心情？这会让这个时刻更有意义。",
-      [
-        {
-          text: "添加语音",
-          onPress: handleAddVoice,
-        },
-        {
-          text: "添加文字",
-          onPress: handleAddText,
-        },
-        {
-          text: "就这样保存",
-          style: "cancel",
-          onPress: handleSaveImageOnly,
-        },
-      ],
-      { cancelable: true }
-    );
+    // 显示确认弹窗
+    setShowConfirmModal(true);
   };
 
-  /**
-   * 保存纯图片日记
-   */
-  const handleSaveImageOnly = async () => {
-    console.log("📸 创建纯图片日记:", selectedImages);
-
+  const doSave = async () => {
+    setIsSaving(true);
     try {
-      setIsSaving(true);
-
-      // 调用服务创建纯图片日记
-      // 这会：1) 上传图片到S3  2) 创建日记记录
-      const diary = await createImageOnlyDiary(selectedImages);
-
-      console.log("✅ 纯图片日记创建成功:", diary.diary_id);
-
-      // 成功提示
-      Alert.alert("保存成功", "你的照片已经记录下来了 ✨", [
+      await createImageOnlyDiary(images);
+      Alert.alert("成功", "图片日记已保存", [
         {
           text: "好的",
           onPress: () => {
-            resetState();
-            onSuccess(); // 通知父组件刷新列表
+            setImages([]);
+            setShowPicker(false);
+            setIsSaving(false);
+            onSuccess();
           },
         },
       ]);
     } catch (error: any) {
-      console.error("❌ 创建纯图片日记失败:", error);
+      console.error("保存失败:", error);
       Alert.alert("保存失败", error.message || "请重试");
-    } finally {
       setIsSaving(false);
     }
   };
 
-  // ========== 渲染 ==========
+  const handleCancel = () => {
+    setImages([]);
+    setShowPicker(false);
+    onClose();
+  };
 
-  /**
-   * 渲染顶部标题栏
-   */
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={handleCancel} disabled={isSaving}>
-        <Text
-          style={[styles.headerButton, isSaving && styles.headerButtonDisabled]}
-        >
-          取消
-        </Text>
-      </TouchableOpacity>
-      <Text style={styles.headerTitle}>
-        {isSaving
-          ? "保存中..."
-          : `已选择 ${selectedImages.length}/${maxImages}`}
-      </Text>
-      <TouchableOpacity
-        onPress={handleComplete}
-        disabled={isSaving || selectedImages.length === 0}
-      >
-        <Text
-          style={[
-            styles.headerButton,
-            styles.headerButtonPrimary,
-            (isSaving || selectedImages.length === 0) &&
-              styles.headerButtonDisabled,
-          ]}
-        >
-          完成
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  // 如果没有图片，不渲染内容
+  if (!visible) return null;
 
-  /**
-   * 渲染图片网格
-   */
-  const renderImageGrid = () => (
-    <ScrollView
-      style={styles.scrollView}
-      contentContainerStyle={styles.imageGrid}
-      showsVerticalScrollIndicator={false}
-    >
-      {selectedImages.map((uri, index) => (
-        <View key={index} style={styles.imageWrapper}>
-          <Image source={{ uri }} style={styles.thumbnail} />
-          {/* 删除按钮 */}
-          <TouchableOpacity
-            style={styles.removeButton}
-            onPress={() => handleRemoveImage(index)}
-          >
-            <Ionicons name="close-circle" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      ))}
-
-      {/* 添加更多按钮 */}
-      {selectedImages.length < maxImages && (
+  // 显示底部选择器
+  if (showPicker) {
+    return (
+      <Modal visible={visible} transparent animationType="fade">
         <TouchableOpacity
-          style={styles.addMoreButton}
-          onPress={handleAddMoreImages}
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={handlePickerCancel}
         >
-          <Ionicons name="add" size={36} color="#999" />
-          <Text style={styles.addMoreText}>添加</Text>
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.pickerContainer}>
+              <Text style={styles.pickerTitle}>选择图片</Text>
+
+              <TouchableOpacity style={styles.pickerOption} onPress={handleTakePhoto}>
+                <Text style={styles.pickerOptionText}>📷 拍照</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.pickerOption} onPress={handlePickFromGallery}>
+                <Text style={styles.pickerOptionText}>🖼️ 从相册选择</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.pickerCancel} onPress={handlePickerCancel}>
+                <Text style={styles.pickerCancelText}>取消</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
         </TouchableOpacity>
-      )}
-    </ScrollView>
-  );
+      </Modal>
+    );
+  }
 
-  /**
-   * 渲染底部工具栏
-   */
-  const renderBottomToolbar = () => (
-    <View style={styles.bottomToolbar}>
-      {/* 图片按钮 */}
-      <TouchableOpacity
-        style={styles.toolbarButton}
-        onPress={handleAddMoreImages}
-        disabled={selectedImages.length >= maxImages}
-      >
-        <ImageInputIcon
-          width={28}
-          height={28}
-          fill={selectedImages.length >= maxImages ? "#CCC" : "#332824"}
-        />
-      </TouchableOpacity>
+  // 如果正在加载图片
+  if (images.length === 0) {
+    return (
+      <Modal visible={visible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#E56C45" />
+        </View>
+      </Modal>
+    );
+  }
 
-      {/* 语音按钮 - 主按钮 */}
-      <TouchableOpacity
-        style={styles.toolbarButtonMain}
-        onPress={handleAddVoice}
-      >
-        <Ionicons name="mic" size={24} color="#fff" />
-      </TouchableOpacity>
-
-      {/* 文字按钮 */}
-      <TouchableOpacity style={styles.toolbarButton} onPress={handleAddText}>
-        <TextInputIcon width={28} height={28} fill="#332824" />
-      </TouchableOpacity>
-    </View>
-  );
-
+  // 显示图片预览界面
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={handleCancel}
-    >
+    <Modal visible={visible} transparent animationType="slide">
       <View style={styles.overlay}>
         <View style={styles.modal}>
-          {/* 顶部标题栏 */}
-          {renderHeader()}
+          {/* 顶部栏 */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={handleCancel}>
+              <Text style={styles.cancelText}>取消</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>图片日记</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving}>
+              <Text style={[styles.saveText, isSaving && styles.saveTextDisabled]}>
+                {isSaving ? "保存中..." : "完成"}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {/* 图片网格 */}
-          {renderImageGrid()}
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.imageGrid}
+            showsVerticalScrollIndicator={false}
+          >
+            {images.map((uri, index) => (
+              <View key={`${uri}-${index}`} style={styles.imageWrapper}>
+                <Image source={{ uri }} style={styles.thumbnail} />
+                <TouchableOpacity
+                  style={styles.removeButton}
+                  onPress={() => handleRemoveImage(index)}
+                >
+                  <Ionicons name="close-circle" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
 
-          {/* 底部工具栏 */}
-          {renderBottomToolbar()}
+            {images.length < maxImages && (
+              <TouchableOpacity style={styles.addButton} onPress={handleAddMore}>
+                <Ionicons name="add" size={36} color="#999" />
+              </TouchableOpacity>
+            )}
+          </ScrollView>
         </View>
+
+        {/* 确认弹窗 */}
+        {showConfirmModal && (
+          <Modal visible={showConfirmModal} transparent animationType="fade">
+            <TouchableOpacity
+              style={styles.confirmOverlay}
+              activeOpacity={1}
+              onPress={() => setShowConfirmModal(false)}
+            >
+              <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+                <View style={styles.confirmContainer}>
+                  {/* 右上角关闭按钮 */}
+                  <TouchableOpacity
+                    style={styles.confirmCloseButton}
+                    onPress={() => setShowConfirmModal(false)}
+                  >
+                    <Ionicons name="close" size={24} color="#999" />
+                  </TouchableOpacity>
+
+                  <Text style={styles.confirmTitle}>温馨提示</Text>
+                  <Text style={styles.confirmMessage}>
+                    要不要添加一些文字或语音，让这个时刻更完整？
+                  </Text>
+
+                  <View style={styles.confirmButtons}>
+                    <TouchableOpacity
+                      style={[styles.confirmButton, styles.confirmButtonSecondary]}
+                      onPress={() => {
+                        setShowConfirmModal(false);
+                        doSave();
+                      }}
+                    >
+                      <Text style={styles.confirmButtonTextSecondary}>就这样保存</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.confirmButton, styles.confirmButtonPrimary]}
+                      onPress={() => {
+                        setShowConfirmModal(false);
+                        // TODO: 打开文字/语音输入
+                        Alert.alert("提示", "此功能即将上线");
+                      }}
+                    >
+                      <Text style={styles.confirmButtonTextPrimary}>添加内容</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        )}
       </View>
     </Modal>
   );
 }
 
-// ========== 样式 ==========
-
 const styles = StyleSheet.create({
+  // 底部选择器样式
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerContainer: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === "ios" ? 40 : 20,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 20,
+    color: "#333",
+  },
+  pickerOption: {
+    backgroundColor: "#F5F5F5",
+    padding: 18,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  pickerOptionText: {
+    fontSize: 16,
+    fontWeight: "500",
+    textAlign: "center",
+    color: "#333",
+  },
+  pickerCancel: {
+    marginTop: 8,
+    padding: 18,
+  },
+  pickerCancelText: {
+    fontSize: 16,
+    textAlign: "center",
+    color: "#999",
+  },
+  
+  // 图片预览界面样式
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
   modal: {
-    backgroundColor: "#FAF6ED", // 使用应用主题色
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    height: 640, // 与 RecordingModal 保持一致
-    paddingBottom: Platform.OS === "ios" ? 34 : 20, // 适配 iPhone 底部安全区域
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: SCREEN_HEIGHT - 80,
+    paddingTop: 20,
   },
-
-  // ===== 顶部标题栏 =====
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: "#E8DFD0",
+    borderBottomColor: "#f0f0f0",
   },
-  headerButton: {
+  title: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+  },
+  cancelText: {
     fontSize: 16,
-    color: "#666",
+    color: "#999",
   },
-  headerButtonPrimary: {
+  saveText: {
+    fontSize: 16,
     color: "#E56C45",
     fontWeight: "600",
   },
-  headerButtonDisabled: {
-    color: "#CCC",
+  saveTextDisabled: {
+    color: "#ccc",
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#332824",
-  },
-
-  // ===== 图片网格 =====
   scrollView: {
     flex: 1,
+    paddingHorizontal: 20,
   },
   imageGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    padding: 20,
-    gap: 10, // 间距
+    justifyContent: "flex-start",
+    paddingTop: 20,
+    paddingBottom: 40,
   },
   imageWrapper: {
     width: THUMBNAIL_SIZE,
     height: THUMBNAIL_SIZE,
-    borderRadius: 12,
+    marginRight: 10,
+    marginBottom: 10,
+    borderRadius: 8,
     overflow: "hidden",
     position: "relative",
-    backgroundColor: "#F5F0E8",
   },
   thumbnail: {
     width: "100%",
     height: "100%",
-    resizeMode: "cover",
   },
   removeButton: {
     position: "absolute",
-    top: 6,
-    right: 6,
+    top: 5,
+    right: 5,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: "center",
-    alignItems: "center",
   },
-  addMoreButton: {
+  addButton: {
     width: THUMBNAIL_SIZE,
     height: THUMBNAIL_SIZE,
-    borderRadius: 12,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
     borderWidth: 2,
-    borderColor: "#E8DFD0",
+    borderColor: "#e0e0e0",
     borderStyle: "dashed",
+  },
+  loadingContainer: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FAFAFA",
   },
-  addMoreText: {
-    fontSize: 12,
-    color: "#999",
-    marginTop: 4,
-  },
-
-  // ===== 底部工具栏 =====
-  bottomToolbar: {
-    flexDirection: "row",
+  
+  // 确认弹窗样式
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
     alignItems: "center",
-    justifyContent: "space-evenly",
     paddingHorizontal: 40,
-    paddingVertical: 12,
+  },
+  confirmContainer: {
     backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#E8DFD0",
-    borderRadius: 200,
-    marginHorizontal: 20,
-    marginBottom: 20,
-    shadowColor: "#E56C45",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 340,
+    position: "relative",
   },
-  toolbarButton: {
-    width: 44,
-    height: 44,
+  confirmCloseButton: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    padding: 4,
+    zIndex: 10,
+  },
+  confirmTitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  confirmMessage: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  confirmButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
   },
-  toolbarButtonMain: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  confirmButtonSecondary: {
+    backgroundColor: "#F5F5F5",
+  },
+  confirmButtonPrimary: {
     backgroundColor: "#E56C45",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#E56C45",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+  },
+  confirmButtonTextSecondary: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#666",
+  },
+  confirmButtonTextPrimary: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
   },
 });
+

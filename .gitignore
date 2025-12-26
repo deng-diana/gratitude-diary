@@ -44,3 +44,4 @@ deploy-*.log
 *.tar.gz
 dist/
 build/
+PROJECT_STRUCTURE.md

@@ -403,8 +403,8 @@ class OpenAIService:
             print(f"   - 任务2: GPT-4o-mini 暖心反馈（字段 sonnet，基于原始文本）")
             
             # 创建两个异步任务
-            polish_task = self._polish_and_generate_title(text, detected_lang)
-            feedback_task = self._generate_ai_feedback(text, detected_lang, user_name)
+            polish_task = self._call_claude_haiku_for_polish(text, detected_lang)
+            feedback_task = self._call_claude_sonnet_for_feedback(text, detected_lang, user_name)
             
             # 并行执行并等待结果
             polish_result, feedback = await asyncio.gather(
@@ -449,10 +449,10 @@ class OpenAIService:
             return self._create_fallback_result(text)
     
     # ========================================================================
-    # 🔥 润色内容并生成标题（使用 GPT-4o-mini）
+    # 🔥 新增：Claude Haiku 调用（润色 + 标题）
     # ========================================================================
     
-    async def _polish_and_generate_title(
+    async def _call_claude_haiku_for_polish(
         self, 
         text: str,
         language: str
@@ -619,10 +619,10 @@ Output: {"title": "A Day at the Park", "polished_content": "Today was good. I we
             }
     
     # ========================================================================
-    # 🔥 生成温暖的 AI 反馈（使用 GPT-4o-mini）
+    # 🔥 新增: OpenAI GPT-4o-mini 调用（AI 反馈）
     # ========================================================================
     
-    async def _generate_ai_feedback(
+    async def _call_claude_sonnet_for_feedback(
         self, 
         text: str,
         language: str,

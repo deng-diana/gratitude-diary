@@ -213,8 +213,8 @@ export default function RecordingModal({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
-        interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
-        interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        interruptionModeIOS: 2, // DoNotMix
+        interruptionModeAndroid: 1, // DoNotMix
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
@@ -229,8 +229,8 @@ export default function RecordingModal({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
-        interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
-        interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        interruptionModeIOS: 2, // DoNotMix
+        interruptionModeAndroid: 1, // DoNotMix
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });

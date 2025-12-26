@@ -45,7 +45,6 @@ import { getGreeting } from "../config/greetings";
 import * as SecureStore from "expo-secure-store";
 import RecordingModal from "../components/RecordingModal";
 import TextInputModal from "../components/TextInputModal";
-import { ImagePickerModal } from "../components/ImagePickerModal";
 import ImageDiaryModal from "../components/ImageDiaryModal";
 
 // ============================================================================
@@ -150,11 +149,8 @@ export default function DiaryListScreen() {
   const [recordingModalVisible, setRecordingModalVisible] = useState(false);
   // ✅ 新增:文字输入Modal状态
   const [textInputModalVisible, setTextInputModalVisible] = useState(false);
-  // ✅ 新增:图片选择Modal状态
-  const [imagePickerModalVisible, setImagePickerModalVisible] = useState(false);
   // ✅ 新增:图片日记Modal状态
   const [imageDiaryModalVisible, setImageDiaryModalVisible] = useState(false);
-  const [selectedImageUris, setSelectedImageUris] = useState<string[]>([]);
 
   // ✅ 录音计时器相关状态
   const [isRecording, setIsRecording] = useState(false);
@@ -579,37 +575,7 @@ export default function DiaryListScreen() {
    */
 
   const handleImageUpload = () => {
-    console.log("📸 打开图片选择Modal");
-    setImagePickerModalVisible(true);
-  };
-
-  /**
-   * 图片选择完成回调 - 打开图片日记Modal
-   */
-  const handleImagesSelected = async (imageUris: string[]) => {
-    console.log("📸 用户选择了图片:", imageUris);
-    setSelectedImageUris(imageUris);
-    setImagePickerModalVisible(false); // 关闭选择器
-    setImageDiaryModalVisible(true); // 打开日记Modal
-  };
-
-  /**
-   * 图片日记创建成功
-   */
-  const handleImageDiarySuccess = () => {
-    console.log("✅ 图片上传成功，刷新列表");
-    setImageDiaryModalVisible(false);
-    setSelectedImageUris([]);
-    loadDiaries(); // 刷新日记列表
-  };
-
-  /**
-   * 图片日记取消
-   */
-  const handleImageDiaryCancel = () => {
-    console.log("❌ 取消图片日记");
-    setImageDiaryModalVisible(false);
-    setSelectedImageUris([]);
+    setImageDiaryModalVisible(true);
   };
 
   /**
@@ -1597,20 +1563,14 @@ export default function DiaryListScreen() {
         onCancel={handleTextInputCancel}
       />
 
-      {/* ✅ 新增:图片选择Modal */}
-      <ImagePickerModal
-        visible={imagePickerModalVisible}
-        onClose={() => setImagePickerModalVisible(false)}
-        onImagesSelected={handleImagesSelected}
-        maxImages={9}
-      />
-
-      {/* ✅ 新增:图片日记Modal */}
+      {/* ✅ 图片日记Modal */}
       <ImageDiaryModal
         visible={imageDiaryModalVisible}
-        initialImages={selectedImageUris}
-        onSuccess={handleImageDiarySuccess}
-        onCancel={handleImageDiaryCancel}
+        onClose={() => setImageDiaryModalVisible(false)}
+        onSuccess={() => {
+          setImageDiaryModalVisible(false);
+          loadDiaries(); // 刷新日记列表
+        }}
         maxImages={9}
       />
 
