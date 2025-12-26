@@ -58,15 +58,17 @@ jobs:
       # 步骤 6: 登录 Expo（使用 EAS CLI）
       - name: Login to Expo
         working-directory: ./mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+          if [ -z "$EXPO_TOKEN" ]; then
             echo "❌ EXPO_TOKEN 未配置，无法继续"
             echo "请在 GitHub Settings > Secrets > Actions 中添加 EXPO_TOKEN"
             echo "获取方法: https://expo.dev/accounts/[your-account]/settings/access-tokens"
             exit 1
           fi
           echo "✅ EXPO_TOKEN 已配置，开始登录..."
-          eas login --token ${{ secrets.EXPO_TOKEN }}
+          eas login
 
       # 步骤 7: 构建应用（根据输入选择平台）
       - name: Build iOS App
