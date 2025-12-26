@@ -24,6 +24,8 @@ import {
   TextInput, // ✅ 添加
   KeyboardAvoidingView, // ✅ 添加
   Platform, // ✅ 添加
+  Image, // ✅ 添加：用于显示图片
+  FlatList, // ✅ 添加：用于图片轮播
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -52,6 +54,7 @@ interface Diary {
   ai_feedback: string;
   audio_url?: string;
   audio_duration?: number;
+  image_urls?: string[]; // 图片URL数组
 }
 
 interface DiaryDetailScreenProps {
@@ -177,8 +180,10 @@ export default function DiaryDetailScreen({
       console.log("💾 保存到后端...");
 
       // ✅ 检查是否有修改
-      const hasTitleChange = isEditingTitle && editedTitle.trim() !== diary.title;
-      const hasContentChange = isEditingContent && editedContent.trim() !== diary.polished_content;
+      const hasTitleChange =
+        isEditingTitle && editedTitle.trim() !== diary.title;
+      const hasContentChange =
+        isEditingContent && editedContent.trim() !== diary.polished_content;
 
       // ✅ 如果有修改，调用后端API更新
       if (hasTitleChange || hasContentChange) {
@@ -340,7 +345,23 @@ export default function DiaryDetailScreen({
    */
   const renderDetailHeader = () => {
     const isEditing = isEditingTitle || isEditingContent;
+    const isImageOnly = isImageOnlyDiary();
 
+    // 纯图片日记：只显示浮动关闭按钮
+    if (isImageOnly) {
+      return (
+        <View style={styles.imageOnlyHeader}>
+          <TouchableOpacity
+            onPress={closeSheet}
+            style={styles.imageOnlyCloseButton}
+          >
+            <Ionicons name="close-outline" size={24} color="#666" />
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // 普通日记：显示完整 header
     return (
       <View style={styles.detailHeader}>
         {isEditing ? (
@@ -407,9 +428,49 @@ export default function DiaryDetailScreen({
     </View>
   );
 
+  // 检测是否为纯图片日记
+  const isImageOnlyDiary = () => {
+    if (!diary) return false;
+    const hasImages = diary.image_urls && diary.image_urls.length > 0;
+    const hasNoContent =
+      !diary.polished_content || diary.polished_content.trim() === "";
+    const hasNoTitle = !diary.title || diary.title.trim() === "";
+    return hasImages && hasNoContent && hasNoTitle;
+  };
+
   const renderDiaryDetail = () => {
     if (!diary) return null;
 
+    // 如果是纯图片日记，只显示图片轮播
+    if (isImageOnlyDiary()) {
+      return (
+        <View style={styles.imageOnlyContainer}>
+          <FlatList
+            data={diary.image_urls || []}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item, index) => `${item}-${index}`}
+            renderItem={({ item }) => (
+              <View style={styles.imageSlide}>
+                <Image
+                  source={{ uri: item }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+            getItemLayout={(data, index) => ({
+              length: Dimensions.get("window").width,
+              offset: Dimensions.get("window").width * index,
+              index,
+            })}
+          />
+        </View>
+      );
+    }
+
+    // 普通日记：显示文字内容
     return (
       <>
         {/* 音频播放器 */}
@@ -472,7 +533,10 @@ export default function DiaryDetailScreen({
             <TouchableOpacity
               onPress={startEditingContent}
               activeOpacity={0.7}
-              accessibilityLabel={diary.polished_content.substring(0, 100) + (diary.polished_content.length > 100 ? "..." : "")}
+              accessibilityLabel={
+                diary.polished_content.substring(0, 100) +
+                (diary.polished_content.length > 100 ? "..." : "")
+              }
               accessibilityHint={t("accessibility.button.editHint")}
               accessibilityRole="button"
             >
@@ -506,9 +570,12 @@ export default function DiaryDetailScreen({
   const MIN_SHEET_HEIGHT = 160;
   const [contentHeight, setContentHeight] = useState(0);
 
-  // ✅ 动态高度:编辑时用最大高度,预览时自适应
+  // ✅ 动态高度:编辑时用最大高度,预览时自适应,纯图片日记全屏
   const isEditing = isEditingTitle || isEditingContent;
-  const sheetHeight = isEditing
+  const isImageOnly = isImageOnlyDiary();
+  const sheetHeight = isImageOnly
+    ? windowHeight // 纯图片日记:全屏显示
+    : isEditing
     ? maxSheetHeight // 编辑模式:使用最大高度
     : Math.max(Math.min(contentHeight, maxSheetHeight), MIN_SHEET_HEIGHT); // 预览模式:自适应
 
@@ -555,31 +622,34 @@ export default function DiaryDetailScreen({
             renderError()
           ) : (
             <>
-              {/* ✅ 拖拽指示器移到最顶部 */}
-              <View style={styles.dragIndicator} />
-
               {/* ✅ 添加Header */}
               {renderDetailHeader()}
 
-              {/* ✅ 包裹KeyboardAvoidingView */}
-              <KeyboardAvoidingView
-                style={{ flex: 1 }}
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 0}
-              >
-                <ScrollView
-                  style={styles.scrollView}
-                  contentContainerStyle={styles.scrollContent}
-                  showsVerticalScrollIndicator={false}
-                  onContentSizeChange={(_, h) => setContentHeight(h + 24)}
-                  bounces
-                  keyboardShouldPersistTaps="handled"
-                  keyboardDismissMode="interactive"
+              {/* 纯图片日记：直接显示图片轮播，不使用 ScrollView */}
+              {isImageOnlyDiary() ? (
+                renderDiaryDetail()
+              ) : (
+                /* 普通日记：使用 ScrollView */
+                <KeyboardAvoidingView
+                  style={{ flex: 1 }}
+                  behavior={Platform.OS === "ios" ? "padding" : "height"}
+                  keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 0}
                 >
-                  {/* 拖拽指示器 */}
-                  {renderDiaryDetail()}
-                </ScrollView>
-              </KeyboardAvoidingView>
+                  <ScrollView
+                    style={styles.scrollView}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    onContentSizeChange={(_, h) => setContentHeight(h + 24)}
+                    bounces
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="interactive"
+                  >
+                    {/* ✅ 拖拽指示器 */}
+                    <View style={styles.dragIndicator} />
+                    {renderDiaryDetail()}
+                  </ScrollView>
+                </KeyboardAvoidingView>
+              )}
             </>
           )}
         </SafeAreaView>
@@ -880,5 +950,40 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "600",
+  },
+
+  // ===== 纯图片日记样式 =====
+  imageOnlyHeader: {
+    position: "absolute",
+    top: -80,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingTop: Platform.OS === "ios" ? 50 : 20,
+    paddingRight: 16,
+    alignItems: "flex-end",
+  },
+  imageOnlyCloseButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageOnlyContainer: {
+    flex: 1,
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+  },
+  imageSlide: {
+    width: Dimensions.get("window").width,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullScreenImage: {
+    width: Dimensions.get("window").width,
+    height: "100%",
   },
 });

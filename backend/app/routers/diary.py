@@ -589,18 +589,10 @@ async def create_image_only_diary(
         
         print(f"📸 Creating image-only diary for user {user_id}, images: {len(image_urls)}")
         
-        # Detect language from user's existing diaries (default to Chinese)
-        # For simplicity, we'll use a simple heuristic based on user's name
-        import re
-        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', user_name))
-        
-        # Generate default title and content based on language
-        if has_chinese:
-            title = "今日随拍"
-            content = f"分享了 {len(image_urls)} 张照片"
-        else:
-            title = "Today's Moments"
-            content = f"Shared {len(image_urls)} photo{'s' if len(image_urls) > 1 else ''}"
+        # For pure image diaries, keep it minimal - no title or content
+        # Images speak for themselves
+        title = ""
+        content = ""
         
         # Create diary entry in database
         diary = db_service.create_diary(
@@ -608,7 +600,7 @@ async def create_image_only_diary(
             original_content=content,
             polished_content=content,
             ai_feedback="",  # No AI feedback for image-only diaries
-            language="zh" if has_chinese else "en",
+            language="zh",  # Default language (not critical for image-only)
             title=title,
             audio_url=None,
             image_urls=image_urls
