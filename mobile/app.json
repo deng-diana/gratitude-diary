@@ -21,6 +21,8 @@
       "buildNumber": "5",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "We need microphone access for voice journaling.",
+        "NSCameraUsageDescription": "We need camera access to take photos for your diary entries.",
+        "NSPhotoLibraryUsageDescription": "We need photo library access to select photos for your diary entries.",
         "NSFaceIDUsageDescription": "Use Face ID to sign in quickly.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["audio"]
@@ -32,7 +34,12 @@
         "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#FAF6ED"
       },
-      "package": "com.stillkindailab.gratitudediary"
+      "package": "com.stillkindailab.gratitudediary",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -44,7 +51,14 @@
       "expo-localization",
       "expo-font",
       "expo-asset",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app needs access to your photos to let you select images for diary entries.",
+          "cameraPermission": "The app needs access to your camera to let you take photos for diary entries."
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -45,6 +45,7 @@ import { getGreeting } from "../config/greetings";
 import * as SecureStore from "expo-secure-store";
 import RecordingModal from "../components/RecordingModal";
 import TextInputModal from "../components/TextInputModal";
+import ImageDiaryModal from "../components/ImageDiaryModal";
 
 // ============================================================================
 // 🌍 导入翻译函数
@@ -148,6 +149,8 @@ export default function DiaryListScreen() {
   const [recordingModalVisible, setRecordingModalVisible] = useState(false);
   // ✅ 新增:文字输入Modal状态
   const [textInputModalVisible, setTextInputModalVisible] = useState(false);
+  // ✅ 新增:图片日记Modal状态
+  const [imageDiaryModalVisible, setImageDiaryModalVisible] = useState(false);
 
   // ✅ 录音计时器相关状态
   const [isRecording, setIsRecording] = useState(false);
@@ -572,8 +575,7 @@ export default function DiaryListScreen() {
    */
 
   const handleImageUpload = () => {
-    Alert.alert(t("home.imageFeatureTitle"), t("home.imageFeatureMessage"));
-    // TODO: 实现图片上传功能
+    setImageDiaryModalVisible(true);
   };
 
   /**
@@ -1559,6 +1561,17 @@ export default function DiaryListScreen() {
         visible={textInputModalVisible}
         onSuccess={handleTextInputSuccess}
         onCancel={handleTextInputCancel}
+      />
+
+      {/* ✅ 图片日记Modal */}
+      <ImageDiaryModal
+        visible={imageDiaryModalVisible}
+        onClose={() => setImageDiaryModalVisible(false)}
+        onSuccess={() => {
+          setImageDiaryModalVisible(false);
+          loadDiaries(); // 刷新日记列表
+        }}
+        maxImages={9}
       />
 
       {/* Diary Detail Modal */}
