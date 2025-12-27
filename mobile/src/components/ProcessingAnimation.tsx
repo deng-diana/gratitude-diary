@@ -36,9 +36,13 @@ export default function ProcessingAnimation({
       accessibilityRole="progressbar"
     >
       <View style={styles.processingContent}>
-        {/* 当前步骤 */}
-        <View style={styles.currentStepContainer}>
+        {/* Emoji - 单独一行，居中对齐 */}
+        <View style={styles.emojiContainer}>
           <Text style={styles.stepEmoji}>{steps[processingStep]?.icon}</Text>
+        </View>
+
+        {/* 步骤文案 - 单独一行，居中对齐 */}
+        <View style={styles.textContainer}>
           <Text style={styles.currentStepText}>{steps[processingStep]?.text}</Text>
         </View>
 
@@ -78,20 +82,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  currentStepContainer: {
-    flexDirection: "row",
+  emojiContainer: {
     alignItems: "center",
-    marginBottom: 24,
+    justifyContent: "center",
+    marginBottom: 12,
+    height: 40, // 固定高度，确保布局稳定
   },
 
   stepEmoji: {
-    fontSize: 24,
-    marginRight: 10,
+    fontSize: 32, // 稍微大一点，更醒目
+    textAlign: "center",
+  },
+
+  textContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+    minHeight: 24, // 最小高度，防止布局跳动
   },
 
   currentStepText: {
     ...Typography.body,
     color: "#1A1A1A",
+    textAlign: "center",
   },
 
   progressSection: {

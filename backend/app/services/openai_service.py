@@ -403,8 +403,8 @@ class OpenAIService:
             print(f"   - 任务2: GPT-4o-mini 暖心反馈（字段 sonnet，基于原始文本）")
             
             # 创建两个异步任务
-            polish_task = self._call_claude_haiku_for_polish(text, detected_lang)
-            feedback_task = self._call_claude_sonnet_for_feedback(text, detected_lang, user_name)
+            polish_task = self._call_gpt4o_mini_for_polish_and_title(text, detected_lang)
+            feedback_task = self._call_gpt4o_mini_for_feedback(text, detected_lang, user_name)
             
             # 并行执行并等待结果
             polish_result, feedback = await asyncio.gather(
@@ -449,19 +449,25 @@ class OpenAIService:
             return self._create_fallback_result(text)
     
     # ========================================================================
-    # 🔥 新增：Claude Haiku 调用（润色 + 标题）
+    # 🔥 GPT-4o-mini 调用（润色 + 标题）
     # ========================================================================
     
-    async def _call_claude_haiku_for_polish(
+    async def _call_gpt4o_mini_for_polish_and_title(
         self, 
         text: str,
         language: str
     ) -> Dict[str, str]:
         """
-        ⚠️ 临时方法：调用 GPT-4o-mini 进行润色和生成标题（替代 Haiku 3.5，避免限流）
+        调用 GPT-4o-mini 进行润色和生成标题
         
-        原计划使用 Claude Haiku 3.5，但正在申请 inference profile，暂时使用 GPT-4o-mini
-        等 Haiku 3.5 申请通过后，从备份文件恢复: openai_service.py.backup-sonnet-haiku
+        📚 学习点：这个函数负责两个任务
+        1. 润色用户的原始文本（修复语法、优化表达）
+        2. 生成一个简洁有意义的标题
+        
+        为什么使用 GPT-4o-mini？
+        - 速度快（1-2秒）
+        - 成本低（$1/1M tokens input）
+        - 质量足够（日记润色绰绰有余）
         
         返回:
             {
@@ -619,27 +625,27 @@ Output: {"title": "A Day at the Park", "polished_content": "Today was good. I we
             }
     
     # ========================================================================
-    # 🔥 新增: OpenAI GPT-4o-mini 调用（AI 反馈）
+    # 🔥 GPT-4o-mini 调用（AI 反馈）
     # ========================================================================
     
-    async def _call_claude_sonnet_for_feedback(
+    async def _call_gpt4o_mini_for_feedback(
         self, 
         text: str,
         language: str,
         user_name: Optional[str] = None
     ) -> str:
         """
-        🔥 新增方法：调用 OpenAI GPT-4o-mini 生成温暖的 AI 反馈
+        调用 GPT-4o-mini 生成温暖的 AI 反馈
+        
+        📚 学习点：这个函数基于用户的原始文本生成反馈
+        - 更真实：保留用户最原始的情感表达
+        - 更快：不需要等待润色完成（可以并行执行）
+        - 更温暖：AI 回应"真实的你"而不是"完美的文字"
         
         为什么选择 GPT-4o-mini？
-        - 共情能力稳定（避免 Claude fallback）
-        - 中英文表达自然（与润色模型一致）
-        - 单一供应商，部署更省心（TestFlight 验证通过）
-        
-        为什么基于原始文本？
-        - 更真实的情感
-        - 不需要等润色完成（并行）
-        - AI 回应"真实的你"
+        - 共情能力稳定
+        - 中英文表达自然
+        - 与润色模型统一，方便维护
         
         返回:
             温暖的反馈文字（简洁有力，不超过用户输入长度）

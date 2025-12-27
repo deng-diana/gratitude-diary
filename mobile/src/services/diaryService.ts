@@ -444,6 +444,352 @@ export async function createVoiceDiary(
 }
 
 /**
+ * 进度更新回调函数类型
+ */
+export interface ProgressCallback {
+  (progress: {
+    step: number;
+    step_name: string;
+    progress: number;
+    message: string;
+  }): void;
+}
+
+/**
+ * 创建语音日记（实时进度版 - 轮询模式）
+ *
+ * 📚 学习点：这是专业的任务队列模式
+ * - 后端创建任务并返回task_id
+ * - 前端定期轮询查询进度（每500ms）
+ * - 跨平台兼容，所有平台都支持
+ *
+ * @param audioUri - 本地音频文件URI
+ * @param duration - 音频时长（秒）
+ * @param onProgress - 进度回调函数（可选）
+ * @returns Promise<Diary> - 最终创建的日记
+ */
+export async function createVoiceDiaryStream(
+  audioUri: string,
+  duration: number,
+  onProgress?: ProgressCallback
+): Promise<Diary> {
+  console.log("🎤 创建语音日记（实时进度版 - 轮询模式）");
+  console.log("音频URI:", audioUri);
+  console.log("时长:", duration, "秒");
+
+  try {
+    // 第1步：创建FormData
+    const formData = new FormData();
+    formData.append("audio", {
+      uri: audioUri,
+      type: "audio/m4a",
+      name: "recording.m4a",
+    } as any);
+    formData.append("duration", duration.toString());
+
+    // 第2步：获取认证token
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      throw new Error("未登录");
+    }
+
+    // 获取用户名字
+    const { getCurrentUser } = await import("./authService");
+    const currentUser = await getCurrentUser();
+    const userName = currentUser?.name?.trim();
+
+    // 第3步：创建任务（发送到异步端点）
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+    };
+
+    if (userName) {
+      headers["X-User-Name"] = userName;
+    }
+
+    const createResponse = await fetch(`${API_BASE_URL}/diary/voice/async`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    // 处理401错误（token过期）
+    if (createResponse.status === 401) {
+      console.log("🔄 Token过期，尝试刷新...");
+      await refreshAccessToken();
+      const newToken = await getAccessToken();
+      if (!newToken) {
+        throw new Error("登录已过期，请重新登录");
+      }
+
+      headers.Authorization = `Bearer ${newToken}`;
+      const retryResponse = await fetch(`${API_BASE_URL}/diary/voice/async`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      if (!retryResponse.ok) {
+        throw new Error("登录已过期，请重新登录");
+      }
+
+      const retryData = await retryResponse.json();
+      return await pollTaskProgress(retryData.task_id, headers, onProgress);
+    }
+
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text().catch(() => "未知错误");
+      throw new Error(`创建任务失败: ${createResponse.status} - ${errorText}`);
+    }
+
+    const taskData = await createResponse.json();
+    const taskId = taskData.task_id;
+
+    console.log("✅ 任务已创建:", taskId);
+
+    // 第4步：轮询查询进度
+    return await pollTaskProgress(taskId, headers, onProgress);
+  } catch (error: any) {
+    console.log("⚠️ 创建语音日记失败:", error);
+    throw error;
+  }
+}
+
+/**
+ * 轮询查询任务进度（智能轮询策略）
+ *
+ * 📚 学习点：智能轮询策略
+ * - 前10秒：每300ms查询一次（快速响应，确保捕获所有中间进度）
+ * - 后面：降到800ms（省电省流量，但仍保持响应性）
+ * - 网络错误时使用指数退避（更稳定）
+ *
+ * 📚 指数退避（Exponential Backoff）：
+ * - 当遇到网络错误时，等待时间按指数增长
+ * - 第1次错误：等待1秒
+ * - 第2次错误：等待2秒
+ * - 第3次错误：等待4秒
+ * - 第4次错误：等待8秒
+ * - 最大等待时间：16秒
+ * - 优点：网络差时不会频繁重试，减少服务器压力，更省电
+ */
+async function pollTaskProgress(
+  taskId: string,
+  headers: Record<string, string>,
+  onProgress?: ProgressCallback
+): Promise<Diary> {
+  const startTime = Date.now();
+  const FAST_POLL_DURATION = 10000; // 前10秒使用快速轮询（确保捕获所有中间进度）
+  const FAST_POLL_INTERVAL = 300; // 快速轮询：300ms（更频繁，确保不遗漏进度）
+  const SLOW_POLL_INTERVAL = 800; // 慢速轮询：800ms（稍快一些，保持响应性）
+  const MAX_POLL_DURATION = 5 * 60 * 1000; // 最多轮询5分钟
+  const MAX_BACKOFF_INTERVAL = 16000; // 最大退避时间：16秒
+
+  let consecutiveErrors = 0; // 连续错误次数（用于指数退避）
+
+  while (Date.now() - startTime < MAX_POLL_DURATION) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/diary/voice/progress/${taskId}`,
+        {
+          method: "GET",
+          headers,
+        }
+      );
+
+      if (response.status === 404) {
+        throw new Error("任务不存在或已过期");
+      }
+
+      if (!response.ok) {
+        throw new Error(`查询进度失败: ${response.status}`);
+      }
+
+      // ✅ 成功请求，重置错误计数
+      consecutiveErrors = 0;
+
+      const progressData = await response.json();
+      const status = progressData.status;
+
+      // 更新进度回调
+      if (onProgress) {
+        // 步骤映射：后端step 0-5 映射到前端step 0-4
+        let frontendStep = progressData.step;
+        if (progressData.step > 0) {
+          frontendStep = progressData.step - 1;
+        }
+        frontendStep = Math.max(0, Math.min(frontendStep, 4));
+
+        onProgress({
+          step: frontendStep,
+          step_name: progressData.step_name || "",
+          progress: progressData.progress || 0,
+          message: progressData.message || "",
+        });
+      }
+
+      // 检查任务状态
+      if (status === "completed") {
+        if (!progressData.diary) {
+          throw new Error("任务完成但未返回日记数据");
+        }
+        console.log("✅ 任务完成:", progressData.diary.diary_id);
+        return progressData.diary;
+      }
+
+      if (status === "failed") {
+        const errorMsg = progressData.error || "任务处理失败";
+        throw new Error(errorMsg);
+      }
+
+      // ✅ 智能轮询间隔：前10秒快速（300ms），后面慢速（800ms）
+      const elapsed = Date.now() - startTime;
+      const pollInterval =
+        elapsed < FAST_POLL_DURATION ? FAST_POLL_INTERVAL : SLOW_POLL_INTERVAL;
+
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    } catch (error: any) {
+      // 如果是最终错误（完成或失败），直接抛出
+      if (
+        error.message.includes("任务完成") ||
+        error.message.includes("任务处理失败") ||
+        error.message.includes("任务不存在")
+      ) {
+        throw error;
+      }
+
+      // ✅ 网络错误：使用指数退避
+      consecutiveErrors++;
+      const backoffInterval = Math.min(
+        Math.pow(2, consecutiveErrors - 1) * 1000, // 1s, 2s, 4s, 8s, 16s...
+        MAX_BACKOFF_INTERVAL
+      );
+
+      console.warn(
+        `⚠️ 轮询错误 (连续${consecutiveErrors}次), ${backoffInterval}ms后重试:`,
+        error.message
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, backoffInterval));
+    }
+  }
+
+  throw new Error("任务处理超时，请稍后重试");
+}
+
+/**
+ * 解析SSE流
+ *
+ * 📚 学习点：SSE数据格式
+ * - 每行以 "data: " 开头
+ * - 可以指定事件类型：event: progress
+ * - 两个换行符 \n\n 表示一个事件结束
+ *
+ * 例子：
+ * event: progress
+ * data: {"step": 1, "progress": 20}
+ *
+ */
+async function parseSSEStream(
+  response: Response,
+  onProgress?: ProgressCallback
+): Promise<Diary> {
+  // 检查响应状态
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "未知错误");
+    throw new Error(`服务器错误: ${response.status} - ${errorText}`);
+  }
+
+  // 检查响应体
+  if (!response.body) {
+    console.error("❌ 响应体为空，响应状态:", response.status);
+    console.error("响应头:", Object.fromEntries(response.headers.entries()));
+    throw new Error("无法读取响应流：响应体为空");
+  }
+
+  const reader = response.body.getReader();
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let diary: Diary | null = null;
+  let error: Error | null = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      // 解码数据块
+      buffer += decoder.decode(value, { stream: true });
+
+      // 处理完整的SSE事件（以\n\n结尾）
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop() || ""; // 保留最后一个不完整的事件
+
+      for (const eventBlock of lines) {
+        if (!eventBlock.trim()) continue;
+
+        // 解析SSE事件
+        const eventLines = eventBlock.split("\n");
+        let eventType = "message";
+        let eventData = "";
+
+        for (const line of eventLines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.substring(7).trim();
+          } else if (line.startsWith("data: ")) {
+            eventData = line.substring(6).trim();
+          }
+        }
+
+        if (!eventData) continue;
+
+        try {
+          const data = JSON.parse(eventData);
+
+          // 处理进度更新
+          if (eventType === "progress" && onProgress) {
+            onProgress({
+              step: data.step || 0,
+              step_name: data.step_name || "",
+              progress: data.progress || 0,
+              message: data.message || "",
+            });
+          }
+
+          // 处理完成事件
+          if (eventType === "complete" && data.diary) {
+            diary = data.diary;
+          }
+
+          // 处理错误事件
+          if (eventType === "error") {
+            error = new Error(data.error || "处理失败");
+          }
+        } catch (e) {
+          console.warn("解析SSE数据失败:", e, eventData);
+        }
+      }
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    if (!diary) {
+      throw new Error("未收到完整结果");
+    }
+
+    console.log("✅ 语音日记创建成功（流式）:", diary.diary_id);
+    return diary;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * 更新日记内容和/或标题
  *
  * @param diaryId - 日记ID

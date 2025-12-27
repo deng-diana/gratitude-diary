@@ -8,12 +8,13 @@
  */
 import { ActivityIndicator } from "react-native";
 import { Audio } from "expo-av";
-import {
-  activateKeepAwakeAsync,
-  deactivateKeepAwake,
-} from "expo-keep-awake";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { Alert } from "react-native";
-import { createVoiceDiary } from "../services/diaryService";
+import {
+  createVoiceDiary,
+  createVoiceDiaryStream,
+  ProgressCallback,
+} from "../services/diaryService";
 import { updateDiary } from "../services/diaryService";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
@@ -87,11 +88,36 @@ export default function RecordingModal({
   // ✅ 优化步骤时长：更合理的分配，减少卡顿
   // 🎯 策略：前面的步骤稍快，后面的步骤稍慢，总体更流畅
   const processingSteps = [
-    { icon: "📤", text: t("diary.processingSteps.upload"), duration: 800, progress: 20 }, // 20% - 快速上传
-    { icon: "👂", text: t("diary.processingSteps.listen"), duration: 3000, progress: 50 }, // 30% - 转录（最耗时）
-    { icon: "✨", text: t("diary.processingSteps.polish"), duration: 2000, progress: 70 }, // 20% - 润色
-    { icon: "💭", text: t("diary.processingSteps.title"), duration: 1200, progress: 85 }, // 15% - 标题
-    { icon: "💬", text: t("diary.processingSteps.feedback"), duration: 1200, progress: 100 }, // 15% - 反馈
+    {
+      icon: "📤",
+      text: t("diary.processingSteps.upload"),
+      duration: 800,
+      progress: 20,
+    }, // 20% - 快速上传
+    {
+      icon: "👂",
+      text: t("diary.processingSteps.listen"),
+      duration: 3000,
+      progress: 50,
+    }, // 30% - 转录（最耗时）
+    {
+      icon: "✨",
+      text: t("diary.processingSteps.polish"),
+      duration: 2000,
+      progress: 70,
+    }, // 20% - 润色
+    {
+      icon: "💭",
+      text: t("diary.processingSteps.title"),
+      duration: 1200,
+      progress: 85,
+    }, // 15% - 标题
+    {
+      icon: "💬",
+      text: t("diary.processingSteps.feedback"),
+      duration: 1200,
+      progress: 100,
+    }, // 15% - 反馈
   ];
 
   /**
@@ -109,25 +135,47 @@ export default function RecordingModal({
 
   /**
    * 平滑更新进度条（简化版 - 确保不倒退）
-   * 
+   *
    * 🎯 核心原则：
    * 1. 进度值只能增加，不能减少
    * 2. 从当前动画值继续，而不是从状态值
    * 3. 使用 ref 保存当前值，确保跨步骤连续性
    */
   const smoothUpdateProgress = useCallback(
-    (target: number, duration: number = 800) => {
+    (target: number, duration?: number) => {
       // ✅ 确保目标值不小于当前值
       const safeTarget = Math.max(target, currentProgressRef.current);
-      
-      console.log(`🎯 更新进度: ${currentProgressRef.current}% → ${safeTarget}% (时长: ${duration}ms)`);
+      const currentValue = currentProgressRef.current;
+      const progressDiff = safeTarget - currentValue;
+
+      // ✅ 智能计算动画时长：根据进度跳跃大小动态调整
+      // 小跳跃（<5%）：快速更新（300ms）
+      // 中跳跃（5-20%）：中等速度（600ms）
+      // 大跳跃（>20%）：慢速平滑（1000ms）
+      let calculatedDuration = duration;
+      if (calculatedDuration === undefined) {
+        if (progressDiff < 5) {
+          calculatedDuration = 300; // 小跳跃：快速
+        } else if (progressDiff < 20) {
+          calculatedDuration = 600; // 中跳跃：中等
+        } else {
+          calculatedDuration = 1000; // 大跳跃：慢速平滑
+        }
+      }
+
+      console.log(
+        `🎯 更新进度: ${currentValue}% → ${safeTarget}% (跳跃: ${progressDiff}%, 时长: ${calculatedDuration}ms)`
+      );
 
       // 停止之前的动画（但不重置值）
       progressAnimValue.stopAnimation();
-      
+
       // 清理之前的监听器
       if (progressAnimationRef.current) {
-        if (typeof progressAnimationRef.current === 'object' && progressAnimationRef.current.cancel) {
+        if (
+          typeof progressAnimationRef.current === "object" &&
+          progressAnimationRef.current.cancel
+        ) {
           progressAnimationRef.current.cancel();
         }
         progressAnimationRef.current = null;
@@ -141,17 +189,21 @@ export default function RecordingModal({
       progressAnimValue.setValue(startValue);
 
       // 使用 Animated API 实现平滑过渡
+      // 使用更平滑的缓动函数，让大跳跃也能平滑过渡
       const animation = Animated.timing(progressAnimValue, {
         toValue: safeTarget,
-        duration: duration,
-        easing: Easing.out(Easing.quad), // 使用简单的缓出曲线，更平滑
+        duration: calculatedDuration,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1), // 使用贝塞尔曲线，更平滑自然
         useNativeDriver: false,
       });
 
       // 使用监听器实时更新状态和 ref
       const listenerId = progressAnimValue.addListener(({ value }) => {
         // ✅ 确保值只增不减
-        const clampedValue = Math.max(currentProgressRef.current, Math.min(100, value));
+        const clampedValue = Math.max(
+          currentProgressRef.current,
+          Math.min(100, value)
+        );
         currentProgressRef.current = clampedValue;
         setProcessingProgress(clampedValue);
       });
@@ -172,7 +224,7 @@ export default function RecordingModal({
         cancel: () => {
           animation.stop();
           progressAnimValue.removeListener(listenerId);
-        }
+        },
       } as any;
     },
     [progressAnimValue]
@@ -575,7 +627,7 @@ export default function RecordingModal({
             await resultSoundRef.current.unloadAsync();
             resultSoundRef.current = null;
           }
-          
+
           // ✅ 清理进度更新定时器
           if (resultProgressIntervalRef.current) {
             clearInterval(resultProgressIntervalRef.current);
@@ -696,12 +748,14 @@ export default function RecordingModal({
               if (seconds >= 540 && !hasShown9MinWarning.current) {
                 hasShown9MinWarning.current = true;
                 setNearLimit(true);
-                
+
                 // 轻触反馈（iOS）
                 if (Platform.OS === "ios") {
                   try {
                     const Haptics = await import("expo-haptics");
-                    await Haptics.default.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    await Haptics.default.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Medium
+                    );
                   } catch (e) {
                     console.log("Haptics 不可用:", e);
                   }
@@ -793,12 +847,14 @@ export default function RecordingModal({
               if (seconds >= 540 && !hasShown9MinWarning.current) {
                 hasShown9MinWarning.current = true;
                 setNearLimit(true);
-                
+
                 // 轻触反馈（iOS）
                 if (Platform.OS === "ios") {
                   try {
                     const Haptics = await import("expo-haptics");
-                    await Haptics.default.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    await Haptics.default.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Medium
+                    );
                   } catch (e) {
                     console.log("Haptics 不可用:", e);
                   }
@@ -885,28 +941,65 @@ export default function RecordingModal({
       setIsPaused(false);
       setDuration(0);
 
-      // ✅ 启动步骤动画
-      const cleanupSteps = simulateProcessingSteps();
+      // ✅ 重置进度状态（准备接收真实进度）
+      setProcessingStep(0);
+      setProcessingProgress(0);
+      currentProgressRef.current = 0; // ✅ 重置 ref，确保从 0 开始
+      progressAnimValue.setValue(0); // ✅ 重置动画值，确保从 0 开始
 
       try {
-        // 调用后端API
-        const diary = await createVoiceDiary(uri!, recordedDuration);
+        // 📚 学习点：进度回调函数
+        // 这个函数会在后端处理过程中被多次调用
+        // 每次后端推送进度更新时，这个函数就会执行
+        const progressCallback: ProgressCallback = (progressData) => {
+          console.log("📊 收到进度更新:", progressData);
+
+          // ✅ 智能步骤匹配：根据进度百分比来确定步骤，而不是仅依赖后端step
+          // 这样确保文案与进度完全匹配
+          const progress = progressData.progress;
+          let frontendStep = 0;
+
+          // 根据进度百分比智能匹配步骤
+          if (progress < 20) {
+            // 0-20%: 上传音频
+            frontendStep = 0;
+          } else if (progress < 50) {
+            // 20-50%: 语音转文字
+            frontendStep = 1;
+          } else if (progress < 70) {
+            // 50-70%: AI润色
+            frontendStep = 2;
+          } else if (progress < 85) {
+            // 70-85%: 生成标题
+            frontendStep = 3;
+          } else {
+            // 85-100%: 生成反馈
+            frontendStep = 4;
+          }
+
+          // 确保索引在有效范围内
+          frontendStep = Math.max(
+            0,
+            Math.min(frontendStep, processingSteps.length - 1)
+          );
+
+          // 更新当前步骤
+          setProcessingStep(frontendStep);
+
+          // ✅ 平滑更新进度（自动计算动画时长，根据进度跳跃大小）
+          // 不指定duration，让函数自动根据进度差计算合适的动画时长
+          smoothUpdateProgress(progressData.progress);
+        };
+
+        // ✅ 使用轮询模式实现实时进度（专业方案）
+        // 后端创建任务并返回task_id，前端定期查询进度
+        // 这是跨平台兼容、稳定可靠的方案
+        const diary = await createVoiceDiaryStream(
+          uri!,
+          recordedDuration,
+          progressCallback
+        );
         console.log("✅ 后端返回成功");
-
-        // ✅ 优化：如果后端提前完成，平滑推进到100%
-        // 🎨 苹果风格：无论何时完成，都平滑过渡到100%
-        if (processingProgress < 100) {
-          console.log(`⏳ 后端提前完成，当前进度${processingProgress}%，平滑推进到100%`);
-
-          // ✅ 使用更快的动画（500ms）快速到达100%
-          smoothUpdateProgress(100, 500);
-          
-          // ✅ 等待动画完成（略长于动画时长，确保流畅）
-          await new Promise((resolve) => setTimeout(resolve, 600));
-        }
-
-        // ✅ 停止模拟
-        cleanupSteps && cleanupSteps();
 
         console.log("✅ 日记创建成功:", diary);
 
@@ -924,39 +1017,38 @@ export default function RecordingModal({
         console.log(`  内容: "${diary.ai_feedback}"`);
         console.log(`  标题: "${diary.title}"`);
       } catch (error: any) {
-        // ✅ 停止模拟（错误时）
-        cleanupSteps && cleanupSteps();
         console.log("❌ 处理失败:", error);
         setPendingDiaryId(null);
         setHasSavedPendingDiary(false);
 
         // ✅ 检查是否是空内容错误（EMPTY_TRANSCRIPT）
-        if (error.code === "EMPTY_TRANSCRIPT" || 
-            (error.message && (
-              error.message.includes("No valid speech detected") ||
+        if (
+          error.code === "EMPTY_TRANSCRIPT" ||
+          (error.message &&
+            (error.message.includes("No valid speech detected") ||
               error.message.includes("空内容") ||
               error.message.includes("未能识别到") ||
               error.message.includes("识别到的内容过短") ||
               error.message.includes("检测到的内容过于简单") ||
               error.message.includes("检测到的内容主要是语气词") ||
               error.message.includes("检测到的内容只包含标点符号") ||
-              error.message.includes("未能识别到任何语音内容")
-            ))) {
+              error.message.includes("未能识别到任何语音内容")))
+        ) {
           // 空内容错误：只提供"重录"选项
-        Alert.alert(
-          t("error.emptyRecording.title"),
-          t("error.emptyRecording.message"),
-          [
-            {
-              text: t("common.rerecord"),
-              onPress: () => {
-                setIsProcessing(false);
-                startRecording();
+          Alert.alert(
+            t("error.emptyRecording.title"),
+            t("error.emptyRecording.message"),
+            [
+              {
+                text: t("common.rerecord"),
+                onPress: () => {
+                  setIsProcessing(false);
+                  startRecording();
+                },
               },
-            },
-          ]
-        );
-        setToastVisible(false);
+            ]
+          );
+          setToastVisible(false);
           return;
         }
 
@@ -991,7 +1083,7 @@ export default function RecordingModal({
 
   /**
    * 模拟处理步骤和进度（优化版 - 更平滑，无卡顿）
-   * 
+   *
    * 🎨 苹果风格优化：
    * 1. 使用连续的进度值（20%, 50%, 70%, 85%, 100%）而不是均匀分配
    * 2. 每个步骤的动画时长根据实际处理时间动态调整
@@ -1010,7 +1102,11 @@ export default function RecordingModal({
 
     processingSteps.forEach((step, index) => {
       const timer = setTimeout(() => {
-        console.log(`📍 步骤 ${index + 1}/${totalSteps}: ${step.text} (目标: ${step.progress}%)`);
+        console.log(
+          `📍 步骤 ${index + 1}/${totalSteps}: ${step.text} (目标: ${
+            step.progress
+          }%)`
+        );
         setProcessingStep(index);
 
         // ✅ 动画时长 = 步骤时长，确保动画完成时步骤也完成
@@ -1029,11 +1125,14 @@ export default function RecordingModal({
 
       // ✅ 停止所有动画
       progressAnimValue.stopAnimation();
-      
+
       // ✅ 清理进度动画
       if (progressAnimationRef.current) {
         // 如果是对象（新的格式），调用 cancel
-        if (typeof progressAnimationRef.current === 'object' && progressAnimationRef.current.cancel) {
+        if (
+          typeof progressAnimationRef.current === "object" &&
+          progressAnimationRef.current.cancel
+        ) {
           progressAnimationRef.current.cancel();
         } else {
           // 如果是旧的格式（定时器），清理
@@ -1062,7 +1161,7 @@ export default function RecordingModal({
         }
         return;
       }
-      
+
       // ✅ 恢复播放
       if (resultSoundRef.current) {
         await resultSoundRef.current.playAsync();
@@ -1120,7 +1219,7 @@ export default function RecordingModal({
           }
 
           const status = await resultSoundRef.current.getStatusAsync();
-          
+
           if (status.isLoaded) {
             const durationMillis = status.durationMillis;
             const positionMillis = status.positionMillis;
@@ -1198,8 +1297,11 @@ export default function RecordingModal({
 
       // ✅ 检查是否有修改 - 使用实际值比较（更可靠）
       if (resultDiary) {
-        const hasTitleChange = isEditingTitle && editedTitle.trim() !== resultDiary.title;
-        const hasContentChange = isEditingContent && editedContent.trim() !== resultDiary.polished_content;
+        const hasTitleChange =
+          isEditingTitle && editedTitle.trim() !== resultDiary.title;
+        const hasContentChange =
+          isEditingContent &&
+          editedContent.trim() !== resultDiary.polished_content;
 
         if (hasTitleChange || hasContentChange) {
           console.log("📝 更新日记到后端:", resultDiary.diary_id);
@@ -1225,7 +1327,7 @@ export default function RecordingModal({
         resultSoundRef.current.unloadAsync().catch(console.log);
         resultSoundRef.current = null;
       }
-      
+
       // ✅ 清理进度更新定时器
       if (resultProgressIntervalRef.current) {
         clearInterval(resultProgressIntervalRef.current);
@@ -1365,11 +1467,15 @@ export default function RecordingModal({
             })}
           >
             <View style={styles.processingContent}>
-              {/* 当前步骤 */}
-              <View style={styles.currentStepContainer}>
+              {/* Emoji - 单独一行，居中对齐 */}
+              <View style={styles.emojiContainer}>
                 <Text style={styles.stepEmoji}>
                   {processingSteps[processingStep]?.icon}
                 </Text>
+              </View>
+
+              {/* 步骤文案 - 单独一行，居中对齐 */}
+              <View style={styles.textContainer}>
                 <Text style={styles.currentStepText}>
                   {processingSteps[processingStep]?.text}
                 </Text>
@@ -1387,7 +1493,9 @@ export default function RecordingModal({
                 </View>
                 <Text
                   style={styles.progressText}
-                  accessibilityLabel={`${t("accessibility.status.processing")}, ${Math.round(processingProgress)}%`}
+                  accessibilityLabel={`${t(
+                    "accessibility.status.processing"
+                  )}, ${Math.round(processingProgress)}%`}
                 >
                   {Math.round(processingProgress)}%
                 </Text>
@@ -1453,7 +1561,11 @@ export default function RecordingModal({
             </Animated.View>
 
             <Text style={styles.statusText}>
-              {isPaused ? t("diary.pauseRecording") : nearLimit ? t("recording.nearLimit") : ""}
+              {isPaused
+                ? t("diary.pauseRecording")
+                : nearLimit
+                ? t("recording.nearLimit")
+                : ""}
             </Text>
 
             <View style={styles.timeRow}>
@@ -1530,7 +1642,9 @@ export default function RecordingModal({
         <TouchableOpacity
           onPress={isEditing ? cancelEditing : handleCancelRecording}
           style={styles.resultHeaderButton}
-          accessibilityLabel={isEditing ? t("common.cancel") : t("common.close")}
+          accessibilityLabel={
+            isEditing ? t("common.cancel") : t("common.close")
+          }
           accessibilityHint={t("accessibility.button.closeHint")}
           accessibilityRole="button"
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1668,7 +1782,10 @@ export default function RecordingModal({
                 <TouchableOpacity
                   onPress={startEditingContent}
                   activeOpacity={0.7}
-                  accessibilityLabel={resultDiary.polished_content.substring(0, 100) + (resultDiary.polished_content.length > 100 ? "..." : "")}
+                  accessibilityLabel={
+                    resultDiary.polished_content.substring(0, 100) +
+                    (resultDiary.polished_content.length > 100 ? "..." : "")
+                  }
                   accessibilityHint={t("accessibility.button.editHint")}
                   accessibilityRole="button"
                 >
@@ -2051,18 +2168,26 @@ const styles = StyleSheet.create({
     maxWidth: 260,
     alignItems: "center",
   },
-  currentStepContainer: {
-    flexDirection: "row",
+  emojiContainer: {
     alignItems: "center",
-    marginBottom: 24, // ✅ 减小间距
+    justifyContent: "center",
+    marginBottom: 8,
+    height: 40, // 固定高度，确保布局稳定
   },
   stepEmoji: {
-    fontSize: 24, // ✅ 缩小图标
-    marginRight: 10,
+    fontSize: 32, // 稍微大一点，更醒目
+    textAlign: "center",
+  },
+  textContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+    minHeight: 24, // 最小高度，防止布局跳动
   },
   currentStepText: {
     ...Typography.body,
     color: "#1A1A1A",
+    textAlign: "center",
   },
   progressSection: {
     width: "100%",
