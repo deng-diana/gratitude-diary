@@ -158,6 +158,15 @@ GitHub Actions workflows are configured for:
 
 See `.github/workflows/` for configuration details.
 
+### ⚠️ Pre-Push Checklist
+
+**Before pushing code to GitHub, ensure:**
+
+1. **`mobile/src/config/aws-config.ts`**: Set `IS_LOCAL_DEV = false` for production builds
+2. **`mobile/src/navigation/AppNavigator.tsx`**: Set `DEV_MODE_FORCE_ONBOARDING = false`
+
+A pre-commit hook is configured to automatically check these settings. If you see an error during commit, fix the configuration and try again.
+
 ## 📚 Documentation
 
 - [Project Structure](./PROJECT_STRUCTURE.md) - Detailed architecture documentation
