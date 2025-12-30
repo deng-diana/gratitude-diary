@@ -659,11 +659,11 @@ export default function RecordingModal({
           console.log("📊 收到进度更新:", progressData);
           const progress = progressData.progress;
           
-          // ✅ 使用后端返回的 step（pollTaskProgress 中已经映射好了）
-          // 后端 step 0-5 映射到前端 step 0-4
+          // ✅ 直接使用 pollTaskProgress 中已经映射好的 step（无需再次映射）
+          // pollTaskProgress 已经将后端 step 0-5 正确映射到前端 step 0-4
           let frontendStep = progressData.step ?? 0;
 
-          // ✅ 确保步骤在有效范围内
+          // ✅ 确保步骤在有效范围内（0-4，对应5个步骤）
           frontendStep = Math.max(0, Math.min(frontendStep, processingSteps.length - 1));
 
           console.log(`📊 进度更新: step=${frontendStep}, progress=${progress}%, message=${progressData.message || progressData.step_name}`);

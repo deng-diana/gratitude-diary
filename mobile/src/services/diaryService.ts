@@ -813,9 +813,8 @@ export async function pollTaskProgress(
   onProgress?: ProgressCallback
 ): Promise<Diary> {
   const startTime = Date.now();
-  const FAST_POLL_DURATION = 10000; // 前10秒使用快速轮询（确保捕获所有中间进度）
-  const FAST_POLL_INTERVAL = 300; // 快速轮询：300ms（更频繁，确保不遗漏进度）
-  const SLOW_POLL_INTERVAL = 800; // 慢速轮询：800ms（稍快一些，保持响应性）
+  const FAST_POLL_DURATION = 15000; // 前15秒使用快速轮询（确保捕获所有中间进度）
+  const FAST_POLL_INTERVAL = 300; // 快速轮询：300ms（确保实时性，不遗漏进度）
   const MAX_POLL_DURATION = 5 * 60 * 1000; // 最多轮询5分钟
   const MAX_BACKOFF_INTERVAL = 16000; // 最大退避时间：16秒
 
@@ -845,29 +844,82 @@ export async function pollTaskProgress(
       const progressData = await response.json();
       const status = progressData.status;
 
-      // 更新进度回调
+      // ✅ 先检查任务状态，如果是完成或失败，先处理状态再调用进度回调
+      if (status === "completed") {
+        if (!progressData.diary) {
+          throw new Error("任务完成但未返回日记数据");
+        }
+        // ✅ 完成任务前，最后一次更新进度（100%）
+        if (onProgress) {
+          onProgress({
+            step: 4,
+            step_name: "完成",
+            progress: 100,
+            message: "处理完成",
+          });
+        }
+        console.log("✅ 任务完成:", progressData.diary.diary_id);
+        return progressData.diary;
+      }
+
+      if (status === "failed") {
+        // ✅ 任务失败前，最后一次更新进度（显示错误信息）
+        if (onProgress) {
+          const progress = progressData.progress || 0;
+          onProgress({
+            step: 0,
+            step_name: progressData.step_name || "错误",
+            progress: progress,
+            message: progressData.message || progressData.error || "处理失败",
+          });
+        }
+        const errorMsg = progressData.error || progressData.message || "任务处理失败";
+        // ✅ 创建一个特殊的错误对象，标记为任务失败，避免被误判为网络错误
+        const taskFailedError = new Error(errorMsg);
+        (taskFailedError as any).isTaskFailed = true; // 标记为任务失败错误
+        throw taskFailedError;
+      }
+
+      // ✅ 正常处理中：更新进度回调
       if (onProgress) {
-        // ✅ 步骤映射：根据进度值推断前端步骤（更可靠）
+        // ✅ 步骤映射：根据progress值和step_name智能映射到前端步骤
         // 前端 step: 0(上传) -> 1(转录) -> 2(润色) -> 3(标题) -> 4(反馈)
-        // 进度区间: 0-20% -> 20-50% -> 50-70% -> 70-85% -> 85-100%
+        // 映射策略：优先使用progress值，结合step_name确保准确性
         const progress = progressData.progress || 0;
+        const stepName = (progressData.step_name || "").toLowerCase();
         let frontendStep = 0;
 
+        // ✅ 根据progress值推断前端步骤（更可靠）
         if (progress < 20) {
-          frontendStep = 0; // 上传
+          frontendStep = 0; // 上传阶段 (0-20%)
         } else if (progress < 50) {
-          frontendStep = 1; // 转录
+          frontendStep = 1; // 转录阶段 (20-50%)
         } else if (progress < 70) {
-          frontendStep = 2; // 润色
+          frontendStep = 2; // 润色阶段 (50-70%)
         } else if (progress < 85) {
-          frontendStep = 3; // 标题
+          frontendStep = 3; // 标题阶段 (70-85%)
         } else {
-          frontendStep = 4; // 反馈
+          frontendStep = 4; // 反馈/完成阶段 (85-100%)
         }
 
+        // ✅ 根据step_name微调映射（提高准确性）
+        // 如果step_name明确指示了步骤，使用step_name的判断
+        if (stepName.includes("上传") || stepName.includes("初始化") || stepName.includes("开始")) {
+          frontendStep = 0;
+        } else if (stepName.includes("识别") || stepName.includes("转录") || stepName.includes("倾听")) {
+          frontendStep = Math.max(frontendStep, 1); // 至少是转录阶段
+        } else if (stepName.includes("润色") || stepName.includes("美化")) {
+          frontendStep = Math.max(frontendStep, 2); // 至少是润色阶段
+        } else if (stepName.includes("标题") || stepName.includes("title")) {
+          frontendStep = Math.max(frontendStep, 3); // 至少是标题阶段
+        } else if (stepName.includes("反馈") || stepName.includes("完成") || stepName.includes("保存")) {
+          frontendStep = Math.max(frontendStep, 4); // 至少是反馈/完成阶段
+        }
+
+        // ✅ 确保步骤在有效范围内（0-4）
         frontendStep = Math.max(0, Math.min(frontendStep, 4));
 
-        console.log(`📊 后端进度: step=${progressData.step}, progress=${progress}%, step_name=${progressData.step_name}, 映射到前端step=${frontendStep}`);
+        console.log(`📊 后端进度: backendStep=${progressData.step}, progress=${progress}%, step_name=${progressData.step_name}, 映射到前端step=${frontendStep}`);
 
         onProgress({
           step: frontendStep,
@@ -877,32 +929,28 @@ export async function pollTaskProgress(
         });
       }
 
-      // 检查任务状态
-      if (status === "completed") {
-        if (!progressData.diary) {
-          throw new Error("任务完成但未返回日记数据");
-        }
-        console.log("✅ 任务完成:", progressData.diary.diary_id);
-        return progressData.diary;
-      }
-
-      if (status === "failed") {
-        const errorMsg = progressData.error || "任务处理失败";
-        throw new Error(errorMsg);
-      }
-
-      // ✅ 智能轮询间隔：前10秒快速（300ms），后面慢速（800ms）
+      // ✅ 优化轮询间隔：确保实时性，不会错过进度更新
+      // 前15秒使用快速轮询（300ms），之后使用中等速度（500ms）
+      // 这样既能保证实时性，又能节省资源
       const elapsed = Date.now() - startTime;
       const pollInterval =
-        elapsed < FAST_POLL_DURATION ? FAST_POLL_INTERVAL : SLOW_POLL_INTERVAL;
+        elapsed < FAST_POLL_DURATION ? FAST_POLL_INTERVAL : 500; // 改为500ms，更实时
 
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
     } catch (error: any) {
-      // 如果是最终错误（完成或失败），直接抛出
+      // ✅ 如果是任务失败错误（通过 isTaskFailed 标记），直接抛出
+      if ((error as any).isTaskFailed) {
+        throw error;
+      }
+
+      // ✅ 如果是最终错误（完成或失败），直接抛出
       if (
         error.message.includes("任务完成") ||
         error.message.includes("任务处理失败") ||
-        error.message.includes("任务不存在")
+        error.message.includes("任务不存在") ||
+        error.message.includes("语音识别失败") ||
+        error.message.includes("未识别到有效内容") ||
+        error.message.includes("处理失败")
       ) {
         throw error;
       }

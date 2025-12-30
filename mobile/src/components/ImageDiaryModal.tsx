@@ -688,11 +688,11 @@ export default function ImageDiaryModal({
       // ✅ 进度回调
       const progressCallback: ProgressCallback = (progressData) => {
         const progress = progressData.progress;
-        // ✅ 使用后端返回的 step（已经映射好了）
-        // pollTaskProgress 中已经将后端 step 0-5 映射到前端 step 0-4
-        let frontendStep = progressData.step || 0;
+        // ✅ 直接使用 pollTaskProgress 中已经映射好的 step（无需再次映射）
+        // pollTaskProgress 已经将后端 step 0-5 正确映射到前端 step 0-4
+        let frontendStep = progressData.step ?? 0;
 
-        // ✅ 确保步骤在有效范围内
+        // ✅ 确保步骤在有效范围内（根据场景：语音模式5个步骤0-4，图片+文字模式4个步骤0-3）
         frontendStep = Math.max(
           0,
           Math.min(frontendStep, processingSteps.length - 1)
