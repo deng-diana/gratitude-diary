@@ -178,36 +178,6 @@ class OpenAIService:
                 print(f"❌ 转录内容过短: '{text}'")
                 raise ValueError("未识别到有效内容，请说清楚一些")
             
-            cleaned_text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", " ", text.lower()).strip()
-            compact_text = cleaned_text.replace(" ", "")
-            fallback_phrases = [
-                "thank you for watching",
-                "thanks for watching",
-                "thank you so much for watching",
-                "please subscribe",
-                "don't forget to subscribe",
-                "subscribe to my channel",
-                "remember to subscribe",
-                "leave a comment",
-                "smash that like button",
-                "that's it",
-                "thats it",
-                "that's all",
-                "thats all",
-            ]
-            normalized_fallbacks = []
-            for phrase in fallback_phrases:
-                normalized_fallbacks.append(phrase)
-                normalized_fallbacks.append(phrase.replace(" ", ""))
-                normalized_fallbacks.append(phrase.replace("'", ""))
-                normalized_fallbacks.append(phrase.replace(" ", "").replace("'", ""))
-            if any(phrase in cleaned_text or phrase in compact_text for phrase in normalized_fallbacks):
-                print(
-                    "❌ 检测到模板化填充语句，视为无效内容:",
-                    {"text": text, "cleaned": cleaned_text},
-                )
-                raise ValueError("未识别到有效内容，请说清楚一些")
-            
             filler_tokens = {
                 "um",
                 "uh",
@@ -300,7 +270,11 @@ class OpenAIService:
             )
             
             if reference_duration and reference_duration >= 6:
-                if (speech_ratio is None or speech_ratio < 0.2) or total_confident_duration < 1.0:
+                if (
+                    len(normalized_text) < self.LENGTH_LIMITS["min_audio_text"]
+                    and (speech_ratio is None or speech_ratio < 0.15)
+                    and total_confident_duration < 0.6
+                ):
                     print(
                         "❌ 检测到有效语音过少:",
                         {
@@ -313,19 +287,7 @@ class OpenAIService:
                     )
                     raise ValueError("未识别到有效内容，请说清楚一些")
             
-            # 使用文本与时长的关系做进一步校验（防止幻觉）
-            if reference_duration and reference_duration >= 10:
-                char_per_second = len(normalized_text) / reference_duration
-                if char_per_second < 0.8:
-                    print(
-                        "❌ 文本与音频时长不匹配，疑似静音录音:",
-                        {
-                            "text_length": len(normalized_text),
-                            "reference_duration": reference_duration,
-                            "char_per_second": char_per_second,
-                        },
-                    )
-                    raise ValueError("未识别到有效内容，请稍作表达后再试")
+            # 对长录音不再使用字符密度硬阈值，避免误杀真实内容
 
             if reference_duration and len(meaningful_tokens) < 2:
                 print(
