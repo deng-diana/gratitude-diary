@@ -120,7 +120,7 @@ export default {
   // 首页/日记列表
   home: {
     welcome: "Hi {name}",
-    subtitle: "今天，有什么想感谢的，或想留下些什么吗？",
+    subtitle: "今天，有什么想感谢的，\n或想留下些什么吗？",
     myDiary: "我珍藏的片刻",
     noDiaries: "要不要暂停一下，记录今天？开启属于你的故事",
     refreshing: "刷新中...",
@@ -180,9 +180,8 @@ export default {
 
   // 文字日记创建
   createTextDiary: {
-    title: "记录此刻",
-    promptTitle: "此刻，你想记住什么？",
-    textPlaceholder: "在这里写下来，让这一刻停留...",
+    title: "文字记录",
+    textPlaceholder: "有什么想感激的，或想温柔分享的吗？",
     characterCount: "{{count}}/500",
     minCharacters: "再写",
     charactersRequired: "个字就可以啦",
@@ -196,7 +195,7 @@ export default {
 
   // 图片日记
   createImageDiary: {
-    title: "记录此刻",
+    title: "图片记录",
     textPlaceholder: "为这些瞬间写下你的故事...",
     submitButton: "完成",
     confirmMessage: "用文字或语音记录这一刻的感受，让回忆更完整",

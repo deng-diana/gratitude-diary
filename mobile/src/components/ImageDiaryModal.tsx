@@ -132,6 +132,9 @@ export default function ImageDiaryModal({
   const [resultCurrentTime, setResultCurrentTime] = useState(0);
   const [resultDuration, setResultDuration] = useState(0);
   const resultSoundRef = useRef<Audio.Sound | null>(null);
+  const resultProgressIntervalRef = useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
 
   // ✅ 新增：录音动画值
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -223,6 +226,10 @@ export default function ImageDiaryModal({
         resultSoundRef.current = null;
         setIsPlayingResult(false);
       }
+      if (resultProgressIntervalRef.current) {
+        clearInterval(resultProgressIntervalRef.current);
+        resultProgressIntervalRef.current = null;
+      }
     }
     // ✅ 移除 cancelRecording 从依赖项数组，使用 ref 代替
     // ✅ 添加 isProcessing 到依赖项，确保处理状态变化时也能正确控制选择器
@@ -240,6 +247,9 @@ export default function ImageDiaryModal({
     return () => {
       if (progressAnimationRef.current) {
         clearInterval(progressAnimationRef.current);
+      }
+      if (resultProgressIntervalRef.current) {
+        clearInterval(resultProgressIntervalRef.current);
       }
     };
   }, []);
@@ -708,7 +718,8 @@ export default function ImageDiaryModal({
       const { taskId, headers } = await createVoiceDiaryTask(
         uri,
         recordedDuration,
-        textContent.trim() || undefined
+        textContent.trim() || undefined,
+        images.length > 0
       );
 
       // ✅ 启动轮询（后台执行）
@@ -796,6 +807,10 @@ export default function ImageDiaryModal({
         } catch (_) {}
         resultSoundRef.current = null;
       }
+      if (resultProgressIntervalRef.current) {
+        clearInterval(resultProgressIntervalRef.current);
+        resultProgressIntervalRef.current = null;
+      }
 
       // ✅ 先重置所有状态（必须在 onClose 之前重置，避免 useEffect 触发 showPicker）
       // 关键：先重置 images 和 showPicker，防止 useEffect 重新打开选择器
@@ -856,6 +871,43 @@ export default function ImageDiaryModal({
     if (!resultDiary?.audio_url) return;
 
     try {
+      const startProgressTimer = () => {
+        if (resultProgressIntervalRef.current) {
+          clearInterval(resultProgressIntervalRef.current);
+          resultProgressIntervalRef.current = null;
+        }
+        resultProgressIntervalRef.current = setInterval(async () => {
+          try {
+            if (!resultSoundRef.current) {
+              clearInterval(resultProgressIntervalRef.current!);
+              resultProgressIntervalRef.current = null;
+              return;
+            }
+            const status = await resultSoundRef.current.getStatusAsync();
+            if (status.isLoaded) {
+              if (status.durationMillis) {
+                setResultDuration((prev) => {
+                  const seconds = Math.floor(status.durationMillis! / 1000);
+                  return prev !== seconds ? seconds : prev;
+                });
+              }
+              if (status.positionMillis !== undefined) {
+                setResultCurrentTime(status.positionMillis / 1000);
+              }
+              if (status.didJustFinish) {
+                clearInterval(resultProgressIntervalRef.current!);
+                resultProgressIntervalRef.current = null;
+                setIsPlayingResult(false);
+                setResultCurrentTime(0);
+                await resultSoundRef.current.setPositionAsync(0);
+              }
+            }
+          } catch (error) {
+            console.error("❌ 更新播放进度失败:", error);
+          }
+        }, 50);
+      };
+
       // 如果正在播放,则暂停
       if (isPlayingResult) {
         if (resultSoundRef.current) {
@@ -867,8 +919,18 @@ export default function ImageDiaryModal({
 
       // ✅ 恢复播放
       if (resultSoundRef.current) {
+        const status = await resultSoundRef.current.getStatusAsync();
+        if (status.isLoaded && status.durationMillis) {
+          const nearEnd = status.positionMillis >= status.durationMillis - 200;
+          if (nearEnd) {
+            await resultSoundRef.current.setPositionAsync(0);
+            setResultCurrentTime(0);
+          }
+        }
+        await resultSoundRef.current.setProgressUpdateIntervalAsync(100);
         await resultSoundRef.current.playAsync();
         setIsPlayingResult(true);
+        startProgressTimer();
         return;
       }
 
@@ -898,6 +960,7 @@ export default function ImageDiaryModal({
 
       resultSoundRef.current = sound;
       setIsPlayingResult(true);
+      await sound.setProgressUpdateIntervalAsync(100);
 
       // ✅ 初始化 duration
       const initialDuration = resultDiary.audio_duration || 0;
@@ -910,16 +973,10 @@ export default function ImageDiaryModal({
         }
       }
 
-      // ✅ 监听播放状态
+      startProgressTimer();
       sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded) {
-          if (status.positionMillis !== null) {
-            setResultCurrentTime(status.positionMillis / 1000);
-          }
-          if (status.didJustFinish) {
-            setIsPlayingResult(false);
-            setResultCurrentTime(0);
-          }
+        if (status.isLoaded && status.didJustFinish) {
+          setIsPlayingResult(false);
         }
       });
     } catch (error) {
@@ -1007,20 +1064,26 @@ export default function ImageDiaryModal({
   // ✅ 渲染结果页面Header
   const renderResultHeader = () => {
     return (
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={handleCancel}
-          accessibilityLabel={t("common.close")}
-          accessibilityHint={t("accessibility.button.closeHint")}
-          accessibilityRole="button"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="close-outline" size={24} color="#666" />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t("createImageDiary.title")}</Text>
-        <View style={styles.headerRight} />
-      </View>
+      <>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={handleCancel}
+            accessibilityLabel={t("common.close")}
+            accessibilityHint={t("accessibility.button.closeHint")}
+            accessibilityRole="button"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close-outline" size={24} color="#666" />
+          </TouchableOpacity>
+          <View style={styles.titleRow}>
+            <PreciousMomentsIcon width={20} height={20} />
+            <Text style={styles.title}>{t("createImageDiary.title")}</Text>
+          </View>
+          <View style={styles.headerRight} />
+        </View>
+        <View style={styles.headerDivider} />
+      </>
     );
   };
 
@@ -1077,6 +1140,14 @@ export default function ImageDiaryModal({
                 totalDuration={resultDuration}
                 hasPlayedOnce={false}
                 onPlayPress={handlePlayResultAudio}
+                onSeek={async (seekTime) => {
+                  if (resultSoundRef.current) {
+                    await resultSoundRef.current.setPositionAsync(
+                      seekTime * 1000
+                    );
+                    setResultCurrentTime(seekTime);
+                  }
+                }}
                 style={styles.resultAudioPlayer}
               />
             )}
@@ -1442,21 +1513,25 @@ export default function ImageDiaryModal({
             >
               <Ionicons name="close-outline" size={24} color="#666" />
             </TouchableOpacity>
-            <Text
-              style={[
-                styles.title,
-                {
-                  fontFamily: getFontFamilyForText(
-                    t("createImageDiary.title"),
-                    "medium"
-                  ),
-                },
-              ]}
-            >
-              {t("createImageDiary.title")}
-            </Text>
+            <View style={styles.titleRow}>
+              <PreciousMomentsIcon width={20} height={20} />
+              <Text
+                style={[
+                  styles.title,
+                  {
+                    fontFamily: getFontFamilyForText(
+                      t("createImageDiary.title"),
+                      "medium"
+                    ),
+                  },
+                ]}
+              >
+                {t("createImageDiary.title")}
+              </Text>
+            </View>
             <View style={styles.headerRight} />
           </View>
+          <View style={styles.headerDivider} />
 
           {/* 图片网格和文字输入 */}
           <KeyboardAvoidingView
@@ -1588,7 +1663,10 @@ export default function ImageDiaryModal({
                                   await resultSoundRef.current.stopAsync();
                                   await resultSoundRef.current.unloadAsync();
                                 } catch (error) {
-                                  console.log("清理音频播放器时出错（可忽略）:", error);
+                                  console.log(
+                                    "清理音频播放器时出错（可忽略）:",
+                                    error
+                                  );
                                 }
                                 resultSoundRef.current = null;
                                 setIsPlayingResult(false);
@@ -1598,14 +1676,21 @@ export default function ImageDiaryModal({
                               try {
                                 await cancelRecording();
                               } catch (error) {
-                                console.log("取消之前的录音时出错（可忽略）:", error);
+                                console.log(
+                                  "取消之前的录音时出错（可忽略）:",
+                                  error
+                                );
                               }
 
                               // ✅ 关键修复3：增加等待时间，确保音频系统完全准备好
                               // 先等待 200ms 让音频播放器完全停止
-                              await new Promise((resolve) => setTimeout(resolve, 200));
+                              await new Promise((resolve) =>
+                                setTimeout(resolve, 200)
+                              );
                               // 再等待 100ms 让音频系统完全重置
-                              await new Promise((resolve) => setTimeout(resolve, 100));
+                              await new Promise((resolve) =>
+                                setTimeout(resolve, 100)
+                              );
 
                               // ✅ 现在可以安全地开始录音
                               await startRecording();
@@ -1617,7 +1702,9 @@ export default function ImageDiaryModal({
                           }}
                           activeOpacity={0.8}
                           accessibilityLabel={t("diary.startRecording")}
-                          accessibilityHint={t("accessibility.button.recordHint")}
+                          accessibilityHint={t(
+                            "accessibility.button.recordHint"
+                          )}
                           accessibilityRole="button"
                         >
                           <MicIcon width={16} height={16} />
@@ -1704,7 +1791,6 @@ export default function ImageDiaryModal({
               />
             </View>
           )}
-
         </View>
 
         {/* 确认弹窗 */}
@@ -1917,7 +2003,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingVertical: 16,
   },
   closeButton: {
     padding: 4,
@@ -1926,8 +2012,18 @@ const styles = StyleSheet.create({
     ...Typography.sectionTitle,
     color: "#1A1A1A",
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   headerRight: {
     width: 36, // 与 TextInputModal 保持一致
+  },
+  headerDivider: {
+    height: 1,
+    backgroundColor: "#F0F0F0",
+    marginHorizontal: 20,
   },
   saveText: {
     fontSize: 16,
@@ -1952,7 +2048,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "flex-start",
     paddingTop: 24,
-    marginBottom: 0, // ✅ 调整为0，与textPreviewContainer的marginTop配合，总间距为20px
+    marginBottom: 12, // 与输入框保持12px间距
   },
   // 文字输入框样式 - 与 TextInputModal 保持一致
   inputContainer: {
@@ -1965,7 +2061,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAF6ED",
     borderRadius: 12,
     padding: 16,
-    paddingLeft: 64, // 为左下角语音按钮留出空间
+    paddingLeft: 20, // 让占位文字与常规输入对齐
+    paddingRight: 32, // 给右下角计数器留出空间，避免过早折行
     paddingBottom: 40, // 为字符计数和按钮留出空间
     color: "#1A1A1A",
     textAlignVertical: "top",
@@ -2373,14 +2470,15 @@ const styles = StyleSheet.create({
   resultImageGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8,
-    marginBottom: 4,
+    alignContent: "flex-start", // 控制行间距
+    marginTop: 20, // 图片距离上方分割线的间距
+    marginBottom: 0,
   },
   resultImageWrapper: {
     width: THUMBNAIL_SIZE,
     height: THUMBNAIL_SIZE,
     marginRight: 8,
-    marginBottom: 8,
+    marginBottom: 0,
     borderRadius: 8,
     overflow: "hidden",
   },
@@ -2393,7 +2491,7 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
   },
   resultAudioPlayer: {
-    marginTop: 4, // ✅ 进一步缩小间距，让图片和语音更紧凑
+    marginTop: 12, // 缩小图片与语音条之间的间距
     marginBottom: 12,
   },
   resultDiaryCard: {

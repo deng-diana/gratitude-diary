@@ -93,6 +93,7 @@ export default function DiaryDetailScreen({
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ✅ 新增:编辑相关状态
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -122,6 +123,10 @@ export default function DiaryDetailScreen({
     return () => {
       if (soundRef.current) {
         soundRef.current.unloadAsync().catch(console.log);
+      }
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
       }
     };
   }, []);
@@ -255,11 +260,34 @@ export default function DiaryDetailScreen({
     if (!diary?.audio_url) return;
 
     try {
+      const startProgressTimer = () => {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
+        }
+        progressIntervalRef.current = setInterval(async () => {
+          if (!soundRef.current) return;
+          const status = await soundRef.current.getStatusAsync();
+          if (status.isLoaded) {
+            if (status.durationMillis !== undefined) {
+              setDuration(Math.floor(status.durationMillis / 1000));
+            }
+            if (status.positionMillis !== undefined) {
+              setCurrentTime(status.positionMillis / 1000);
+            }
+          }
+        }, 50);
+      };
+
       // 如果正在播放，则暂停
       if (currentPlayingId === diary.diary_id) {
         if (soundRef.current) {
           await soundRef.current.pauseAsync();
           setCurrentPlayingId(null);
+        }
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+          progressIntervalRef.current = null;
         }
         return;
       }
@@ -287,6 +315,8 @@ export default function DiaryDetailScreen({
 
       soundRef.current = sound;
       setCurrentPlayingId(diary.diary_id);
+      await sound.setProgressUpdateIntervalAsync(100);
+      startProgressTimer();
 
       // 监听播放状态更新
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -295,7 +325,8 @@ export default function DiaryDetailScreen({
           const positionMillis = status.positionMillis;
 
           if (durationMillis !== undefined && positionMillis !== undefined) {
-            setCurrentTime(Math.floor(positionMillis / 1000));
+            // ✅ 使用精确的时间值（保留小数），进度条组件会使用 Animated API 平滑更新
+            setCurrentTime(positionMillis / 1000);
             setDuration(Math.floor(durationMillis / 1000));
           }
 
@@ -303,6 +334,10 @@ export default function DiaryDetailScreen({
           if (status.didJustFinish) {
             setCurrentPlayingId(null);
             setCurrentTime(0);
+            if (progressIntervalRef.current) {
+              clearInterval(progressIntervalRef.current);
+              progressIntervalRef.current = null;
+            }
             sound.unloadAsync();
             soundRef.current = null;
           }
@@ -738,6 +773,12 @@ export default function DiaryDetailScreen({
             currentTime={currentTime}
             totalDuration={duration}
             onPlayPress={handlePlayAudio}
+            onSeek={async (seekTime) => {
+              if (soundRef.current) {
+                await soundRef.current.setPositionAsync(seekTime * 1000);
+                setCurrentTime(seekTime);
+              }
+            }}
             style={styles.audioSection}
           />
         )}
@@ -2046,7 +2087,7 @@ const styles = StyleSheet.create({
   // ===== 图片缩略图容器（图片+文字日记）- 动态列数 + 横向滚动 =====
   imageThumbnailContainer: {
     marginTop: 20,
-    marginBottom: 12, // ✅ 减少底部间距，让图片和音频更紧凑
+    marginBottom: 12, // 统一2/3/4/5张图与语音条间距
     // marginHorizontal: 20, // 移除 marginHorizontal，改用 contentContainerStyle padding
   },
   imageThumbnailScrollContent: {

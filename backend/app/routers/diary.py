@@ -21,6 +21,7 @@ from ..services.openai_service import OpenAIService
 from ..services.dynamodb_service import DynamoDBService
 from ..services.s3_service import S3Service
 from ..utils.cognito_auth import get_current_user
+from ..utils.transcription import validate_audio_quality, validate_transcription
 
 # ============================================================================
 # 初始化
@@ -55,136 +56,6 @@ def cleanup_old_tasks():
 def get_openai_service():
     """获取 OpenAI 服务实例（延迟初始化）"""
     return OpenAIService()
-
-
-# ============================================================================
-# 辅助函数
-# ============================================================================
-
-def validate_audio_quality(duration: int, audio_size: int) -> None:
-    """
-    验证音频质量
-    
-    Args:
-        duration: 音频时长（秒）
-        audio_size: 音频文件大小（字节）
-    
-    Raises:
-        HTTPException: 音频质量不合格时抛出
-    """
-    print(f"🔍 开始音频质量验证 - 时长: {duration}秒, 大小: {audio_size} bytes")
-    
-    # 检查时长
-    if duration < 5:
-        raise HTTPException(
-            status_code=400,
-            detail="录音时间太短，请至少录制5秒以上的内容。建议说一个完整的句子。"
-        )
-    
-    if duration > 600:  # 10分钟
-        raise HTTPException(
-            status_code=400,
-            detail="录音时间过长，请控制在10分钟以内"
-        )
-    
-    # 检查文件大小
-    if audio_size < 1000:  # 小于1KB
-        raise HTTPException(
-            status_code=400,
-            detail="音频文件太小，可能没有录制到有效内容"
-        )
-    
-    print(f"✅ 音频质量验证通过")
-
-
-def normalize_transcription(text: str) -> str:
-    """
-    标准化转录文本：去除空白和标点符号
-    
-    与前端 normalize 函数逻辑保持一致
-    
-    Args:
-        text: 原始转录文本
-    
-    Returns:
-        标准化后的文本
-    """
-    if not text:
-        return ""
-    
-    # 去除空白字符（空格、换行、制表符）
-    normalized = re.sub(r'[\s\n\r\t]+', '', text)
-    
-    # 去除标点符号（中英文标点、引号、省略号等）
-    # 使用原始字符串，转义引号
-    normalized = re.sub(r"[.,!?;:，。！？；：\"''\"'\-_/\\…]+", '', normalized)
-    
-    return normalized
-
-
-def validate_transcription(transcription: str, duration: Optional[int] = None) -> None:
-    """
-    验证转录内容的有效性
-    
-    使用 normalize 逻辑：去除空白和标点后判断长度是否<3
-    
-    Args:
-        transcription: 转录文本
-    
-    Raises:
-        HTTPException: 转录内容无效时抛出，错误码为 EMPTY_TRANSCRIPT
-    """
-    print(f"🔍 开始转录结果验证...")
-    print(f"🔍 原始转录结果: '{transcription}'")
-    
-    # 标准化文本（去除空白和标点）
-    normalized = normalize_transcription(transcription)
-    print(f"🔍 标准化后转录结果: '{normalized}' (长度: {len(normalized)})")
-    
-    # ✅ 核心检查：标准化后长度 < 3 视为空内容
-    if len(normalized) < 3:
-        print(f"❌ 转录内容为空或无效（标准化后长度: {len(normalized)}）")
-        raise HTTPException(
-            status_code=400,
-            detail=json.dumps({
-                "code": "EMPTY_TRANSCRIPT",
-                "message": "No valid speech detected."
-            })
-        )
-    
-    if duration is not None and duration >= 6:
-        seconds = max(duration, 1)
-        char_per_second = len(normalized) / seconds
-        word_matches = re.findall(r"[A-Za-z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", transcription)
-        filler_tokens = {"um", "uh", "uhh", "hmm", "erm", "ah", "oh", "mmm"}
-        meaningful_words = [
-            word
-            for word in word_matches
-            if len(word) >= 2 and word.lower() not in filler_tokens
-        ]
-        print(
-            "🔍 语音密度检查:",
-            {
-                "duration": duration,
-                "char_per_second": char_per_second,
-                "word_count": len(word_matches),
-                "meaningful_words": meaningful_words,
-            },
-        )
-        minimal_words_required = max(2, int(duration / 4))
-        if char_per_second < 1.0 and len(meaningful_words) < minimal_words_required:
-            print("❌ 语音密度过低，判定为无效语音")
-            raise HTTPException(
-                status_code=400,
-                detail=json.dumps(
-                    {
-                        "code": "EMPTY_TRANSCRIPT",
-                        "message": "No valid speech detected.",
-                    }
-                ),
-            )
-    
-    print(f"✅ 转录结果验证通过 - 内容: {transcription[:50]}...")
 
 
 # ============================================================================
@@ -763,7 +634,7 @@ async def process_voice_diary_async(
                 # 等待最多30秒，让图片上传完成
                 max_wait_time = 30  # 30秒
                 wait_interval = 0.5  # 每0.5秒检查一次
-                progress_update_interval = 5  # 每5秒更新一次进度
+                progress_update_interval = 1  # 每1秒更新一次进度，更平滑
                 waited_time = 0
                 last_progress_update = 0
                 while waited_time < max_wait_time:
@@ -777,8 +648,15 @@ async def process_voice_diary_async(
                     
                     # ✅ 定期更新进度，避免用户感觉卡住（93% -> 94% -> 95%）
                     if waited_time - last_progress_update >= progress_update_interval:
-                        progress_value = min(93 + int((waited_time / max_wait_time) * 2), 95)
-                        update_task_progress(task_id, "processing", progress_value, 5, "等待图片", f"正在等待图片上传... ({int(waited_time)}秒)")
+                        progress_value = min(93 + int((waited_time / max_wait_time) * 4), 97)
+                        update_task_progress(
+                            task_id,
+                            "processing",
+                            progress_value,
+                            5,
+                            "等待图片",
+                            f"正在等待图片上传... ({int(waited_time)}秒)"
+                        )
                         last_progress_update = waited_time
                     
                     await asyncio.sleep(wait_interval)
@@ -1087,6 +965,7 @@ async def create_voice_diary_async(
     duration: int = Form(...),
     image_urls: Optional[str] = Form(None),  # ✅ 新增：图片URL列表（JSON字符串）
     content: Optional[str] = Form(None),  # ✅ 新增：用户手动输入的文字内容
+    expect_images: bool = Form(False),  # ✅ 是否后续补充图片URL（并行上传场景）
     user: Dict = Depends(get_current_user),
     request: Request = None
 ):
@@ -1135,6 +1014,7 @@ async def create_voice_diary_async(
         task_id = str(uuid.uuid4())
         
         # 初始化任务进度
+        pending_image_upload = bool(expect_images) and not parsed_image_urls
         task_progress[task_id] = {
             "status": "processing",
             "progress": 0,
@@ -1143,7 +1023,7 @@ async def create_voice_diary_async(
             "message": "任务已创建",
             "created_at": datetime.now(timezone.utc),
             "image_urls": parsed_image_urls,  # ✅ 存储图片URL（可能为None，后续可以补充）
-            "pending_image_upload": parsed_image_urls is None  # ✅ 标记是否等待图片上传
+            "pending_image_upload": pending_image_upload  # ✅ 标记是否等待图片上传
         }
         
         # 启动后台异步任务（根据是否有图片选择处理函数）

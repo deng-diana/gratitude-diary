@@ -23,6 +23,7 @@ import {
   Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import PreciousMomentsIcon from "../assets/icons/preciousMomentsIcon.svg";
 import {
   GestureHandlerRootView,
   GestureDetector,
@@ -285,14 +286,19 @@ export default function TextInputModal({
         cleanupSteps && cleanupSteps();
 
         setContent(diary.original_content);
-        setPolishedContent(diary.polished_content || diary.original_content || "");
+        setPolishedContent(
+          diary.polished_content || diary.original_content || ""
+        );
         setTitle(diary.title || "");
         setAiFeedback(diary.ai_feedback || "");
         setCurrentDiaryId(diary.diary_id);
 
         console.log("📊 设置的结果数据:");
         console.log("  - title:", diary.title);
-        console.log("  - polishedContent:", diary.polished_content?.substring(0, 50));
+        console.log(
+          "  - polishedContent:",
+          diary.polished_content?.substring(0, 50)
+        );
         console.log("  - aiFeedback:", diary.ai_feedback?.substring(0, 50));
 
         setIsProcessing(false);
@@ -437,7 +443,9 @@ export default function TextInputModal({
             onPress: async () => {
               try {
                 console.log("🗑️ 用户确认放弃，删除未保存日记:", currentDiaryId);
-                const { deleteDiary } = await import("../services/diaryService");
+                const { deleteDiary } = await import(
+                  "../services/diaryService"
+                );
                 await deleteDiary(currentDiaryId);
               } catch (deleteError) {
                 console.log("⚠️ 删除未保存日记失败（可忽略）:", deleteError);
@@ -561,21 +569,25 @@ export default function TextInputModal({
           >
             <Ionicons name="close-outline" size={24} color="#666" />
           </TouchableOpacity>
-          <Text
-            style={[
-              styles.title,
-              {
-                fontFamily: getFontFamilyForText(
-                  t("createTextDiary.title"),
-                  "medium"
-                ),
-              },
-            ]}
-          >
-            {t("createTextDiary.title")}
-          </Text>
+          <View style={styles.titleRow}>
+            <PreciousMomentsIcon width={20} height={20} />
+            <Text
+              style={[
+                styles.title,
+                {
+                  fontFamily: getFontFamilyForText(
+                    t("createTextDiary.title"),
+                    "medium"
+                  ),
+                },
+              ]}
+            >
+              {t("createTextDiary.title")}
+            </Text>
+          </View>
           <View style={styles.headerRight} />
         </View>
+        <View style={styles.headerDivider} />
 
         {/* ✅ 使用 KeyboardAvoidingView 确保输入区域在键盘上方可见 */}
         <KeyboardAvoidingView
@@ -588,20 +600,6 @@ export default function TextInputModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text
-              style={[
-                styles.promptText,
-                {
-                  fontFamily: getFontFamilyForText(
-                    t("createTextDiary.promptTitle"),
-                    "medium"
-                  ),
-                },
-              ]}
-            >
-              {t("createTextDiary.promptTitle")}
-            </Text>
-
             <View style={styles.inputContainer}>
               <TextInput
                 style={[
@@ -712,19 +710,19 @@ export default function TextInputModal({
             accessibilityHint={t("accessibility.button.saveHint")}
             accessibilityRole="button"
           >
-              <Text
-                style={[
-                  styles.saveButtonText,
-                  {
-                    fontFamily: getFontFamilyForText(
-                      t("diary.saveToJournal"),
-                      "semibold"
-                    ),
-                  },
-                ]}
-              >
-                {t("diary.saveToJournal")}
-              </Text>
+            <Text
+              style={[
+                styles.saveButtonText,
+                {
+                  fontFamily: getFontFamilyForText(
+                    t("diary.saveToJournal"),
+                    "semibold"
+                  ),
+                },
+              ]}
+            >
+              {t("diary.saveToJournal")}
+            </Text>
           </TouchableOpacity>
         </View>
       </>
@@ -847,8 +845,19 @@ const styles = StyleSheet.create({
     ...Typography.sectionTitle,
     color: "#1A1A1A",
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   headerRight: {
     width: 36,
+  },
+  headerDivider: {
+    height: 1,
+    backgroundColor: "#F0F0F0",
+    marginHorizontal: 20,
+    marginBottom: 8, // 分割线与输入框之间的间距
   },
   inputArea: {
     flex: 1,
@@ -857,14 +866,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 20,
     paddingBottom: 40, // ✅ 增加底部间距，确保按钮在键盘上方可见
-  },
-  promptText: {
-    ...Typography.sectionTitle,
-    fontSize: 18,
-    fontWeight: "500",
-    color: "#1A1A1A",
-    marginBottom: 12,
-    marginTop: 12,
   },
   inputContainer: {
     position: "relative",
@@ -993,4 +994,3 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 });
-

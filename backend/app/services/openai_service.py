@@ -197,6 +197,8 @@ class OpenAIService:
                 for token in tokens
                 if len(token) >= 2 and token.lower() not in filler_tokens
             ]
+            cjk_chars = re.findall(r"[\u4e00-\u9fff]", text)
+            has_cjk = len(cjk_chars) > 0
             
             unique_chars = len(set(normalized_text))
             if unique_chars <= 2 and len(normalized_text) > 2:
@@ -289,16 +291,35 @@ class OpenAIService:
             
             # 对长录音不再使用字符密度硬阈值，避免误杀真实内容
 
-            if reference_duration and len(meaningful_tokens) < 2:
-                print(
-                    "❌ 有效词汇数量不足，判定为无意义内容:",
-                    {
-                        "tokens": tokens,
-                        "meaningful_tokens": meaningful_tokens,
-                        "duration": reference_duration,
-                    },
-                )
-                raise ValueError("未识别到有效内容，请稍作表达后再试")
+            if reference_duration:
+                if has_cjk:
+                    # 中文场景：用汉字数量判断，避免“一个长词”被误判
+                    if (
+                        len(cjk_chars) < 3
+                        and len(normalized_text) < self.LENGTH_LIMITS["min_audio_text"]
+                    ):
+                        print(
+                            "❌ 中文有效字符过少，判定为无意义内容:",
+                            {
+                                "cjk_chars": len(cjk_chars),
+                                "duration": reference_duration,
+                            },
+                        )
+                        raise ValueError("未识别到有效内容，请稍作表达后再试")
+                else:
+                    if (
+                        len(meaningful_tokens) < 2
+                        and len(normalized_text) < self.LENGTH_LIMITS["min_audio_text"] * 2
+                    ):
+                        print(
+                            "❌ 有效词汇数量不足，判定为无意义内容:",
+                            {
+                                "tokens": tokens,
+                                "meaningful_tokens": meaningful_tokens,
+                                "duration": reference_duration,
+                            },
+                        )
+                        raise ValueError("未识别到有效内容，请稍作表达后再试")
             
             print(f"✅ 语音识别成功: '{text[:50]}...'")
             return text
@@ -491,14 +512,17 @@ Your responsibilities:
 2. Make the text flow naturally
 3. Keep it ≤115% of original length
 4. **CRITICAL: Preserve ALL original content. Do NOT delete or omit any part of the user's entry.**
-5. Create a short, warm, poetic, meaningful title in the specified language (Chinese or English only)
+5. **Formatting: Preserve the user's line breaks, blank lines, and bullet/numbered lists. Do NOT merge everything into one paragraph.**
+6. **If the input is long and mostly one block (no line breaks), add clear paragraph breaks based on meaning.**
+7. **Avoid overly short paragraphs. Do NOT break right after the first sentence. Keep the first 3 sentences in the same paragraph when you add breaks.**
+8. Create a short, warm, poetic, meaningful title in the specified language (Chinese or English only)
 
 Style: Natural, warm, authentic. Don't over-edit.
 
 Response format (JSON only):
 {{
   "title": "Concise words in the specified language (Chinese or English only)",
-  "polished_content": "fixed text, preserving original language of each part - MUST include all original content"
+  "polished_content": "fixed text, preserving original language AND original formatting (line breaks/lists) - MUST include all original content"
 }}
 
 Example (Chinese language, mixed content with Japanese):
@@ -903,54 +927,104 @@ Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
             text = text.replace('！', '。').replace('!', '.')
             text = re.sub(r'\s+', ' ', text).strip()
             return text
+
+        def clean_text_preserve_formatting(
+            text: str,
+            is_chinese: bool,
+            should_adjust_paragraphs: bool,
+        ) -> str:
+            """
+            保留用户排版（换行/列表），只做轻度清理。
+            """
+            text = re.sub(r'[\U0001F300-\U0001FAFF\U00002700-\U000027BF]+', '', text)
+            text = text.replace('！', '。').replace('!', '.')
+            text = text.replace('\r\n', '\n').replace('\r', '\n')
+            lines = text.split('\n')
+            cleaned_lines = []
+            bullet_pattern = re.compile(r'^(\s*)([-*•]|\d+[.)])\s*(.*)$')
+            for line in lines:
+                if not line.strip():
+                    cleaned_lines.append("")
+                    continue
+                bullet_match = bullet_pattern.match(line)
+                if bullet_match:
+                    indent, marker, content = bullet_match.groups()
+                    content = re.sub(r'\s+', ' ', content).strip()
+                    cleaned_lines.append(f"{indent}{marker} {content}".rstrip())
+                else:
+                    leading_ws = re.match(r'^\s*', line).group(0)
+                    content = line[len(leading_ws):]
+                    content = re.sub(r'\s+', ' ', content).strip()
+                    cleaned_lines.append(f"{leading_ws}{content}".rstrip())
+            cleaned = "\n".join(cleaned_lines).strip()
+
+            if not should_adjust_paragraphs:
+                return cleaned
+
+            # 如果包含列表，避免自动合并段落
+            for line in cleaned.split("\n"):
+                if bullet_pattern.match(line):
+                    return cleaned
+
+            paragraphs = re.split(r"\n\s*\n+", cleaned)
+            if len(paragraphs) <= 1:
+                return cleaned
+
+            def sentence_count(paragraph: str) -> int:
+                if is_chinese:
+                    matches = re.findall(r"[。！？!?；;]", paragraph)
+                else:
+                    matches = re.findall(r"[.!?;]", paragraph)
+                return max(1, len(matches))
+
+            def merge_text(a: str, b: str) -> str:
+                if not a:
+                    return b
+                if is_chinese:
+                    sep = ""
+                else:
+                    sep = "" if a.endswith((" ", "\n")) else " "
+                return f"{a.rstrip()}{sep}{b.lstrip()}"
+
+            # ✅ 首段至少包含3句，避免第一句后断段
+            while len(paragraphs) > 1 and sentence_count(paragraphs[0]) < 3:
+                paragraphs[0] = merge_text(paragraphs[0], paragraphs[1])
+                paragraphs.pop(1)
+
+            # ✅ 合并过短段落（避免空白感）
+            min_chars = 60 if is_chinese else 90
+            i = 1
+            while i < len(paragraphs):
+                if sentence_count(paragraphs[i]) < 2 or len(paragraphs[i]) < min_chars:
+                    paragraphs[i - 1] = merge_text(paragraphs[i - 1], paragraphs[i])
+                    paragraphs.pop(i)
+                else:
+                    i += 1
+
+            return "\n\n".join(p.strip() for p in paragraphs)
         
         def trim_to_complete_sentences(text: str, max_len: int) -> str:
             if len(text) <= max_len:
                 return text
-            
+
             sentence_pattern = r"([。！？.!?])(['\"\"」』)]?)\s*"
-            sentences = []
-            last_end = 0
-            
+            last_end = None
+
             for match in re.finditer(sentence_pattern, text):
                 end_pos = match.end()
-                sentence = text[last_end:end_pos].strip()
-                if sentence:
-                    sentences.append(sentence)
-                last_end = end_pos
-            
-            if last_end < len(text):
-                remaining = text[last_end:].strip()
-                if remaining:
-                    sentences.append(remaining)
-            
-            if not sentences:
-                for punct in ['。', '.', '！', '!', '？', '?', '；', ';']:
-                    idx = text.rfind(punct, 0, max_len + 1)
-                    if idx > max_len * 0.5:
-                        return text[:idx + 1].strip()
-                return text
-            
-            result = []
-            current_len = 0
-            
-            for sentence in sentences:
-                sentence_len = len(sentence)
-                if current_len + sentence_len <= max_len:
-                    result.append(sentence)
-                    current_len += sentence_len
+                if end_pos <= max_len:
+                    last_end = end_pos
                 else:
-                    if len(result) == 0:
-                        return text[:max_len].strip() if max_len < len(text) else text
                     break
-            
-            if not result:
-                return text[:max_len].strip()
-            
-            has_chinese = any('\u4e00' <= char <= '\u9fff' for char in ''.join(result))
-            separator = '' if has_chinese else ' '
-            
-            return separator.join(result).strip()
+
+            if last_end is not None:
+                return text[:last_end].rstrip()
+
+            for punct in ['。', '.', '！', '!', '？', '?', '；', ';']:
+                idx = text.rfind(punct, 0, max_len + 1)
+                if idx > max_len * 0.5:
+                    return text[:idx + 1].rstrip()
+            return text[:max_len].rstrip()
         
         # 修正标题
         title = clean_text(title)
@@ -968,7 +1042,14 @@ Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
                 title = title[:max_len]
         
         # 修正润色内容
-        polished = clean_text(polished)
+        original_has_linebreaks = "\n" in original_text
+        original_has_list = bool(re.search(r"(?m)^\s*([-*•]|\d+[.)])\s+", original_text))
+        should_adjust_paragraphs = not original_has_linebreaks and not original_has_list
+        polished = clean_text_preserve_formatting(
+            polished,
+            is_chinese,
+            should_adjust_paragraphs,
+        )
         max_polished_len = int(orig_len * self.LENGTH_LIMITS["polished_ratio"])
         
         # ✅ 添加长度检查日志

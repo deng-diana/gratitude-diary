@@ -208,7 +208,7 @@ This is a personal project, but suggestions and feedback are welcome!
 
 Private project - All rights reserved
 
-## 👤 Author
+## 👤 Author: Diana Deng
 
 Built with ❤️ for capturing life's meaningful moments
 

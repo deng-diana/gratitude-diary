@@ -690,6 +690,7 @@ export default function RecordingModal({
             (error.message.includes("No valid speech detected") ||
               error.message.includes("空内容") ||
               error.message.includes("未能识别到") ||
+              error.message.includes("未识别到有效内容") ||
               error.message.includes("识别到的内容过短") ||
               error.message.includes("检测到的内容过于简单") ||
               error.message.includes("检测到的内容主要是语气词") ||
@@ -895,10 +896,11 @@ export default function RecordingModal({
 
             // ✅ 更新当前时间（实时更新，确保倒计时正常显示）
             if (positionMillis !== undefined) {
-              const currentTimeSeconds = Math.floor(positionMillis / 1000);
+              // ✅ 使用精确的时间值（保留小数），进度条组件会使用 Animated API 平滑更新
+              const currentTimeSeconds = positionMillis / 1000;
               setResultCurrentTime((prev) => {
-                // 只在时间变化时更新（减少不必要的渲染）
-                if (Math.abs(prev - currentTimeSeconds) >= 1) {
+                // ✅ 只在有变化时更新（避免完全相同的值导致的不必要更新）
+                if (Math.abs(prev - currentTimeSeconds) > 0.001) {
                   return currentTimeSeconds;
                 }
                 return prev;
@@ -911,6 +913,7 @@ export default function RecordingModal({
               resultProgressIntervalRef.current = null;
               setIsPlayingResult(false);
               setResultCurrentTime(0);
+              setHasPlayedResultOnce(false); // ✅ 重置播放状态，恢复到默认状态（隐藏进度条）
               await sound.unloadAsync();
               resultSoundRef.current = null;
             }
@@ -918,7 +921,7 @@ export default function RecordingModal({
         } catch (error) {
           console.error("❌ 更新播放进度失败:", error);
         }
-      }, 100); // ✅ 每100ms更新一次（和日记列表页保持一致）
+      }, 50); // ✅ 每 50ms 更新一次 currentTime，进度条组件使用 Animated API 平滑动画
 
       // 监听播放状态（用于检测暂停等状态变化）
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -1115,19 +1118,22 @@ export default function RecordingModal({
         >
           <Ionicons name="close-outline" size={24} color="#666" />
         </TouchableOpacity>
-        <Text
-          style={[
-            styles.title,
-            {
-              fontFamily: getFontFamilyForText(
-                t("diary.voiceEntry"),
-                "medium"
-              ),
-            },
-          ]}
-        >
-          {t("diary.voiceEntry")}
-        </Text>
+        <View style={styles.titleRow}>
+          <PreciousMomentsIcon width={20} height={20} />
+          <Text
+            style={[
+              styles.title,
+              {
+                fontFamily: getFontFamilyForText(
+                  t("diary.voiceEntry"),
+                  "medium"
+                ),
+              },
+            ]}
+          >
+            {t("diary.voiceEntry")}
+          </Text>
+        </View>
         <View style={styles.headerRight} />
       </View>
 
@@ -1145,13 +1151,7 @@ export default function RecordingModal({
           onTogglePause={isPaused ? resumeRecording : pauseRecording}
           onFinish={handleFinishRecording}
         />
-      ) : (
-        <View style={styles.animationArea}>
-          <View style={styles.processingContent}>
-            <ProcessingAnimation />
-          </View>
-        </View>
-      )}
+      ) : null}
     </>
   );
 
@@ -1271,8 +1271,14 @@ export default function RecordingModal({
                 isPlaying={isPlayingResult}
                 currentTime={resultCurrentTime}
                 totalDuration={resultDuration}
-                hasPlayedOnce={hasPlayedResultOnce} // ✅ 传入 hasPlayedOnce，显示倒计时
+                hasPlayedOnce={hasPlayedResultOnce}
                 onPlayPress={handlePlayResultAudio}
+                onSeek={async (seekTime) => {
+                  if (resultSoundRef.current) {
+                    await resultSoundRef.current.setPositionAsync(seekTime * 1000);
+                    setResultCurrentTime(seekTime);
+                  }
+                }}
                 style={styles.resultAudioPlayer}
               />
             )}
@@ -1543,6 +1549,11 @@ const styles = StyleSheet.create({
   title: {
     ...Typography.sectionTitle,
     color: "#1A1A1A",
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   headerRight: {
     width: 36,

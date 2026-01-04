@@ -13,6 +13,9 @@ import { Audio } from "expo-av";
 import { Alert, AppState } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
+let globalRecordingRef: Audio.Recording | null = null;
+let globalPreparing = false;
+
 export interface UseVoiceRecordingReturn {
   isRecording: boolean;
   isPaused: boolean;
@@ -70,6 +73,9 @@ export function useVoiceRecording(
     return () => {
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(console.error);
+        if (globalRecordingRef === recordingRef.current) {
+          globalRecordingRef = null;
+        }
       }
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -184,6 +190,33 @@ export function useVoiceRecording(
         await new Promise(resolve => setTimeout(resolve, 100));
       }
 
+      // ✅ 全局互斥：防止多个录音实例同时准备
+      // 如果另一个录音正在准备，稍等一会儿再尝试
+      if (globalPreparing) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+      globalPreparing = true;
+
+      // ✅ 如果全局已有录音对象（来自其他组件），先清理
+      if (globalRecordingRef && globalRecordingRef !== recordingRef.current) {
+        try {
+          const status = await globalRecordingRef.getStatusAsync();
+          if (status.isLoaded) {
+            if (status.isRecording) {
+              await globalRecordingRef.stopAndUnloadAsync();
+            } else if (status.canRecord) {
+              await globalRecordingRef.unloadAsync();
+            } else {
+              await globalRecordingRef.unloadAsync();
+            }
+          }
+        } catch (error) {
+          console.log("清理全局录音对象时出错（可忽略）:", error);
+        } finally {
+          globalRecordingRef = null;
+        }
+      }
+
       // ✅ 清理之前的定时器
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -231,6 +264,7 @@ export function useVoiceRecording(
       });
 
       recordingRef.current = recording;
+      globalRecordingRef = recording;
       setIsRecording(true);
       setIsPaused(false);
       setDuration(0);
@@ -242,6 +276,7 @@ export function useVoiceRecording(
       console.error("Failed to start recording:", error);
       Alert.alert("错误", "启动录音失败，请重试");
     } finally {
+      globalPreparing = false;
       setIsStarting(false);
     }
   };
@@ -278,6 +313,9 @@ export function useVoiceRecording(
     try {
       const uri = recordingRef.current.getURI();
       await recordingRef.current.stopAndUnloadAsync();
+      if (globalRecordingRef === recordingRef.current) {
+        globalRecordingRef = null;
+      }
       recordingRef.current = null;
 
       if (durationIntervalRef.current) {
@@ -300,6 +338,9 @@ export function useVoiceRecording(
       try {
         await recordingRef.current.stopAndUnloadAsync();
       } catch (e) {}
+      if (globalRecordingRef === recordingRef.current) {
+        globalRecordingRef = null;
+      }
       recordingRef.current = null;
     }
     if (durationIntervalRef.current) {

@@ -30,6 +30,7 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   RefreshControl,
   Animated,
   ActivityIndicator,
@@ -160,6 +161,10 @@ export default function DiaryListScreen() {
   const [textInputModalVisible, setTextInputModalVisible] = useState(false);
   // ✅ 新增:图片日记Modal状态
   const [imageDiaryModalVisible, setImageDiaryModalVisible] = useState(false);
+  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
+  const [imagePreviewIndex, setImagePreviewIndex] = useState(0);
+  const imagePreviewListRef = useRef<FlatList<string> | null>(null);
   // ✅ 新增:图片+语音模式的状态
   const [imageUrlsForVoice, setImageUrlsForVoice] = useState<
     string[] | undefined
@@ -285,6 +290,9 @@ export default function DiaryListScreen() {
    */
   useFocusEffect(
     React.useCallback(() => {
+      let isActive = true;
+
+      // 进入页面时不做额外处理
       // 如果用户已经登录，则刷新日记列表
       const refreshDiaries = async () => {
         try {
@@ -317,6 +325,28 @@ export default function DiaryListScreen() {
       };
 
       refreshDiaries();
+
+      // 页面失焦或离开时，强制停止所有音频
+      return () => {
+        isActive = false;
+        intervalRefs.current.forEach((intervalId) => {
+          clearInterval(intervalId);
+        });
+        intervalRefs.current.clear();
+
+        soundRefs.current.forEach((player) => {
+          try {
+            player.pause();
+            player.remove();
+          } catch (_) {}
+        });
+        soundRefs.current.clear();
+
+        setCurrentPlayingId(null);
+        setHasPlayedOnce(new Set());
+        setCurrentTime(new Map());
+        setDuration(new Map());
+      };
     }, [])
   );
 
@@ -659,6 +689,28 @@ export default function DiaryListScreen() {
           sound.pause(); // expo-audio 的 pause() 是同步方法
           setCurrentPlayingId(null);
 
+          if (
+            sound.isLoaded &&
+            sound.duration > 0 &&
+            sound.currentTime >= sound.duration - 0.5
+          ) {
+            setCurrentTime((prev) => {
+              const newMap = new Map(prev);
+              newMap.delete(diary.diary_id);
+              return newMap;
+            });
+            setDuration((prev) => {
+              const newMap = new Map(prev);
+              newMap.delete(diary.diary_id);
+              return newMap;
+            });
+            setHasPlayedOnce((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(diary.diary_id);
+              return newSet;
+            });
+          }
+
           // 清理定时器
           const intervalId = intervalRefs.current.get(diary.diary_id);
           if (intervalId) {
@@ -750,9 +802,7 @@ export default function DiaryListScreen() {
         });
       }
 
-      // 监听播放状态更新（优化：只在播放时更新，减少不必要的状态更新）
-      // 使用闭包变量保存上次更新的时间，避免不必要的状态更新
-      let lastUpdateTime = 0;
+      // ✅ 监听播放状态更新（进度条组件使用 Animated API 平滑动画，这里只需要更新 currentTime）
 
       const updateProgress = () => {
         if (!player.isLoaded) {
@@ -773,24 +823,22 @@ export default function DiaryListScreen() {
         }
 
         // expo-audio 的 currentTime 和 duration 已经是秒为单位
-        const currentTimeSeconds = Math.floor(player.currentTime);
+        // ✅ 使用精确的时间值（保留小数），进度条组件会使用 Animated API 平滑更新
+        const currentTimeSeconds = player.currentTime;
         const durationSeconds = Math.floor(player.duration);
 
-        // 只在时间变化时更新（减少不必要的渲染和闪烁）
-        if (currentTimeSeconds !== lastUpdateTime) {
-          lastUpdateTime = currentTimeSeconds;
-
-          setCurrentTime((prev) => {
-            const existing = prev.get(diary.diary_id) || 0;
-            // 只在时间真的变化时更新（避免小数秒的抖动）
-            if (Math.abs(existing - currentTimeSeconds) >= 1) {
-              const newMap = new Map(prev);
-              newMap.set(diary.diary_id, currentTimeSeconds);
-              return newMap;
-            }
-            return prev; // 避免不必要的更新
-          });
-        }
+        // ✅ 频繁更新 currentTime（每次定时器触发都更新），进度条组件会自动平滑动画
+        // ✅ 移除阈值检查，让进度条更频繁地更新，确保平滑移动
+        setCurrentTime((prev) => {
+          const existing = prev.get(diary.diary_id) || 0;
+          // ✅ 只在有变化时更新（避免完全相同的值导致的不必要更新）
+          if (Math.abs(existing - currentTimeSeconds) > 0.001) {
+            const newMap = new Map(prev);
+            newMap.set(diary.diary_id, currentTimeSeconds);
+            return newMap;
+          }
+          return prev;
+        });
 
         // 更新总时长（只在变化时更新）
         if (durationSeconds > 0) {
@@ -857,10 +905,16 @@ export default function DiaryListScreen() {
             newMap.delete(currentDiaryId);
             return newMap;
           });
+          // ✅ 重置 hasPlayedOnce，恢复到默认状态（隐藏进度条）
+          setHasPlayedOnce((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(currentDiaryId);
+            return newSet;
+          });
 
           console.log("✅ 播放完成");
         }
-      }, 100); // 每100ms更新一次
+      }, 50); // ✅ 每 50ms 更新一次 currentTime，进度条组件使用 Animated API 平滑动画
 
       // 保存定时器引用
       intervalRefs.current.set(currentDiaryId, progressInterval);
@@ -972,7 +1026,11 @@ export default function DiaryListScreen() {
 
   const getCopyText = (diary: Diary) => {
     const title = diary.title?.trim();
-    const content = (diary.polished_content || diary.original_content || "").trim();
+    const content = (
+      diary.polished_content ||
+      diary.original_content ||
+      ""
+    ).trim();
     const parts = [title, content].filter(Boolean);
     return parts.join("\n\n").trim();
   };
@@ -1527,16 +1585,25 @@ export default function DiaryListScreen() {
 
       if (imageUrls.length === 1) {
         return (
-          <Image
-            source={{ uri: imageUrls[0] }}
-            style={{
-              width: availableWidth,
-              height: rowHeight,
-              borderRadius: 12,
-              backgroundColor: "#f0f0f0",
+          <Pressable
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              setImagePreviewUrls(imageUrls);
+              setImagePreviewIndex(0);
+              setImagePreviewVisible(true);
             }}
-            resizeMode="cover"
-          />
+          >
+            <Image
+              source={{ uri: imageUrls[0] }}
+              style={{
+                width: availableWidth,
+                height: rowHeight,
+                borderRadius: 12,
+                backgroundColor: "#f0f0f0",
+              }}
+              resizeMode="cover"
+            />
+          </Pressable>
         );
       }
 
@@ -1545,17 +1612,26 @@ export default function DiaryListScreen() {
         return (
           <View style={{ flexDirection: "row", gap }}>
             {imageUrls.slice(0, 2).map((url, imgIndex) => (
-              <Image
+              <Pressable
                 key={imgIndex}
-                source={{ uri: url }}
-                style={{
-                  width: imageWidth,
-                  height: rowHeight,
-                  borderRadius: 12,
-                  backgroundColor: "#f0f0f0",
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  setImagePreviewUrls(imageUrls);
+                  setImagePreviewIndex(imgIndex);
+                  setImagePreviewVisible(true);
                 }}
-                resizeMode="cover"
-              />
+              >
+                <Image
+                  source={{ uri: url }}
+                  style={{
+                    width: imageWidth,
+                    height: rowHeight,
+                    borderRadius: 12,
+                    backgroundColor: "#f0f0f0",
+                  }}
+                  resizeMode="cover"
+                />
+              </Pressable>
             ))}
           </View>
         );
@@ -1565,49 +1641,98 @@ export default function DiaryListScreen() {
       const imageSize = (availableWidth - (numColumns - 1) * gap) / numColumns;
       const maxItems = numColumns;
       const shouldShowBadge = imageUrls.length > maxItems;
-      const displayCount = shouldShowBadge ? maxItems - 1 : imageUrls.length;
+      const displayCount = shouldShowBadge ? maxItems : imageUrls.length;
 
+      if (!shouldShowBadge) {
+        return (
+          <>
+            {imageUrls.slice(0, displayCount).map((url, imgIndex) => (
+              <Pressable
+                key={imgIndex}
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  setImagePreviewUrls(imageUrls);
+                  setImagePreviewIndex(imgIndex);
+                  setImagePreviewVisible(true);
+                }}
+              >
+                <Image
+                  source={{ uri: url }}
+                  style={{
+                    width: imageSize,
+                    height: imageSize,
+                    borderRadius: 8,
+                    backgroundColor: "#f0f0f0",
+                  }}
+                  resizeMode="cover"
+                />
+              </Pressable>
+            ))}
+          </>
+        );
+      }
+
+      const previewImages = imageUrls.slice(0, maxItems);
       return (
         <>
-          {imageUrls.slice(0, displayCount).map((url, imgIndex) => (
-            <Image
+          {previewImages.slice(0, 3).map((url, imgIndex) => (
+            <Pressable
               key={imgIndex}
-              source={{ uri: url }}
-              style={{
-                width: imageSize,
-                height: imageSize,
-                borderRadius: 8,
-                backgroundColor: "#f0f0f0",
+              onPress={(event) => {
+                event?.stopPropagation?.();
+                setImagePreviewUrls(imageUrls);
+                setImagePreviewIndex(imgIndex);
+                setImagePreviewVisible(true);
               }}
-              resizeMode="cover"
-            />
-          ))}
-          {shouldShowBadge && (
-            <View
-              style={[
-                styles.moreBadge,
-                {
+            >
+              <Image
+                source={{ uri: url }}
+                style={{
                   width: imageSize,
                   height: imageSize,
                   borderRadius: 8,
+                  backgroundColor: "#f0f0f0",
+                }}
+                resizeMode="cover"
+              />
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              setImagePreviewUrls(imageUrls);
+              setImagePreviewIndex(3);
+              setImagePreviewVisible(true);
+            }}
+            style={[
+              styles.moreBadge,
+              {
+                width: imageSize,
+                height: imageSize,
+                borderRadius: 8,
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: previewImages[3] }}
+              style={styles.moreBadgeImage}
+              resizeMode="cover"
+            />
+            <View style={styles.moreBadgeOverlay} />
+            <Text
+              style={[
+                styles.moreText,
+                {
+                  fontFamily: getFontFamilyForText(
+                    `+${imageUrls.length - maxItems}`,
+                    "regular"
+                  ),
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.moreText,
-                  {
-                    fontFamily: getFontFamilyForText(
-                      `+${imageUrls.length - displayCount}`,
-                      "regular"
-                    ),
-                  },
-                ]}
-              >
-                +{imageUrls.length - displayCount}
-              </Text>
-            </View>
-          )}
+              +{imageUrls.length - maxItems}
+            </Text>
+          </Pressable>
         </>
       );
     };
@@ -1656,7 +1781,9 @@ export default function DiaryListScreen() {
           <>
             {/* 图片缩略图 */}
             {item.image_urls && item.image_urls.length > 0 && (
-              <View style={[styles.imageGrid, { marginTop: 0, marginBottom: 0 }]}>
+              <View
+                style={[styles.imageGrid, { marginTop: 0, marginBottom: 0 }]}
+              >
                 {renderImageGrid(item.image_urls)}
               </View>
             )}
@@ -1703,7 +1830,7 @@ export default function DiaryListScreen() {
               <View
                 style={[
                   styles.imageGrid,
-                  { marginTop: 8, marginBottom: 0 },
+                  item.audio_url ? styles.imageGridWithAudio : null,
                 ]}
               >
                 {renderImageGrid(item.image_urls)}
@@ -1723,6 +1850,17 @@ export default function DiaryListScreen() {
           }
           hasPlayedOnce={hasPlayedOnce.has(item.diary_id)}
           onPlayPress={() => handlePlayAudio(item)}
+          onSeek={(seekTime) => {
+            const player = soundRefs.current.get(item.diary_id);
+            if (player && player.isLoaded) {
+              player.seekTo(seekTime);
+              setCurrentTime((prev) => {
+                const newMap = new Map(prev);
+                newMap.set(item.diary_id, seekTime);
+                return newMap;
+              });
+            }
+          }}
           style={styles.audioButton}
         />
 
@@ -1981,6 +2119,61 @@ export default function DiaryListScreen() {
         />
       )}
 
+      {/* 全屏图片预览 */}
+      <Modal
+        visible={imagePreviewVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImagePreviewVisible(false)}
+      >
+        <View style={styles.imagePreviewOverlay}>
+          <TouchableOpacity
+            style={styles.imagePreviewClose}
+            onPress={() => setImagePreviewVisible(false)}
+            accessibilityLabel={t("common.close")}
+            accessibilityRole="button"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+
+          <FlatList
+            ref={imagePreviewListRef}
+            data={imagePreviewUrls}
+            keyExtractor={(item, idx) => `${item}-${idx}`}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            initialScrollIndex={imagePreviewIndex}
+            getItemLayout={(_, index) => ({
+              length: Dimensions.get("window").width,
+              offset: Dimensions.get("window").width * index,
+              index,
+            })}
+            onMomentumScrollEnd={(event) => {
+              const width = Dimensions.get("window").width;
+              const nextIndex = Math.round(event.nativeEvent.contentOffset.x / width);
+              setImagePreviewIndex(nextIndex);
+            }}
+            renderItem={({ item }) => (
+              <View style={styles.imagePreviewSlide}>
+                <Image
+                  source={{ uri: item }}
+                  style={styles.imagePreviewImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+          />
+
+          {imagePreviewUrls.length > 1 && (
+            <Text style={styles.imagePreviewCounter}>
+              {imagePreviewIndex + 1} / {imagePreviewUrls.length}
+            </Text>
+          )}
+        </View>
+      </Modal>
+
       {/* iOS 轻量 Toast 提示 - 使用全屏容器确保居中 */}
       {Platform.OS === "ios" && toastVisible && (
         <View style={styles.toastOverlay} pointerEvents="none">
@@ -2218,13 +2411,14 @@ const styles = StyleSheet.create({
   cardContent: {
     ...Typography.body,
     color: "#1A1A1A",
-    marginBottom: 4, // 减少底部间距，避免内容不足3行时出现多余空白
+    marginBottom: 0, // 图片区域统一用 imageGrid 的上边距控制
     textAlign: "left", // ✅ 左对齐，改善中文标点符号显示
   },
 
   // 图片网格样式
   imageGrid: {
     flexDirection: "row",
+    marginTop: 8, // ✅ 与两张图的视觉间距对齐
     marginBottom: 4,
     gap: 8,
   },
@@ -2235,13 +2429,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f0f0",
   },
   moreBadge: {
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(0, 0, 0, 0.25)",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
+  },
+  moreBadgeImage: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+  },
+  moreBadgeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
   },
   moreText: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "600",
   },
 
@@ -2348,6 +2552,10 @@ const styles = StyleSheet.create({
   audioButton: {
     marginTop: 8,
     marginBottom: 0,
+  },
+  imageGridWithAudio: {
+    marginTop: 8,
+    marginBottom: 8,
   },
 
   // ===== 自定义 Action Sheet =====
@@ -2476,6 +2684,34 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "600",
+  },
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imagePreviewClose: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 50 : 30,
+    right: 20,
+    zIndex: 2,
+  },
+  imagePreviewSlide: {
+    width: Dimensions.get("window").width,
+    height: Dimensions.get("window").height,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imagePreviewImage: {
+    width: Dimensions.get("window").width,
+    height: Dimensions.get("window").height * 0.8,
+  },
+  imagePreviewCounter: {
+    position: "absolute",
+    bottom: 40,
+    color: "#fff",
+    fontSize: 16,
   },
 
   // ===== 底部操作栏（胶囊效果）=====

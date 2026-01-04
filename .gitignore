@@ -42,6 +42,7 @@ deploy-*.log
 # 打包文件
 *.zip
 *.tar.gz
+docs/
 dist/
 build/
 PROJECT_STRUCTURE.md

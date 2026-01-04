@@ -605,7 +605,8 @@ export interface ProgressCallback {
 export async function createVoiceDiaryTask(
   audioUri: string,
   duration: number,
-  content?: string
+  content?: string,
+  expectImages?: boolean
 ): Promise<{ taskId: string; headers: Record<string, string> }> {
   console.log("🎤 创建语音日记任务（用于并行优化）");
 
@@ -623,6 +624,9 @@ export async function createVoiceDiaryTask(
     // ✅ 如果有文字内容，添加文字
     if (content && content.trim()) {
       formData.append("content", content.trim());
+    }
+    if (expectImages) {
+      formData.append("expect_images", "true");
     }
 
     // 第2步：获取认证token

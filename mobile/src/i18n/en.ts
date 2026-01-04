@@ -122,7 +122,7 @@ export default {
   // 首页/日记列表
   home: {
     welcome: "Hi {name}",
-    subtitle: "Anything you’d like to appreciate, or gently share today?",
+    subtitle: "Anything you'd like to appreciate,\nor gently share today?",
     myDiary: "My precious moments",
     noDiaries: "Ready to pause and capture your day? Your story begins here",
     refreshing: "Refreshing...",
@@ -182,9 +182,8 @@ export default {
 
   // 文字日记创建
   createTextDiary: {
-    title: "Capture This Moment",
-    promptTitle: "What would you like to remember?",
-    textPlaceholder: "Write it down, let this moment stay...",
+    title: "Text Entry",
+    textPlaceholder: "Anything you'd like to appreciate or gently share?",
     characterCount: "{{count}}/500",
     minCharacters: "Just",
     charactersRequired: "more characters to go",
@@ -198,7 +197,7 @@ export default {
 
   // Image diary
   createImageDiary: {
-    title: "Capture This Moment",
+    title: "Photo Entry",
     textPlaceholder: "Write the story behind these moments...",
     submitButton: "Done",
     confirmMessage: "Add words or voice to capture how you feel in this moment",
