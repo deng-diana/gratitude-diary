@@ -664,8 +664,33 @@ export default function DiaryListScreen() {
    */
   const handleDiaryPress = (diary: Diary) => {
     console.log("查看日记:", diary.diary_id);
+    stopAllAudio();
     setSelectedDiaryForDetail(diary);
     setDiaryDetailVisible(true);
+  };
+
+  /**
+   * 停止所有正在播放的音频
+   * 用于切换页面时避免双重播放
+   */
+  const stopAllAudio = () => {
+    soundRefs.current.forEach((player) => {
+      try {
+        player.pause();
+        player.remove();
+      } catch (_) {}
+    });
+    soundRefs.current.clear();
+
+    intervalRefs.current.forEach((intervalId) => {
+      clearInterval(intervalId);
+    });
+    intervalRefs.current.clear();
+
+    setCurrentPlayingId(null);
+    setHasPlayedOnce(new Set());
+    setCurrentTime(new Map());
+    setDuration(new Map());
   };
 
   // ✅ 新增：音频播放相关函数
@@ -779,7 +804,7 @@ export default function DiaryListScreen() {
       // 初始化：立即设置 duration（优先使用数据库中的audio_duration，如果player已加载则使用player的duration）
       const initialDuration =
         player.isLoaded && player.duration > 0
-          ? Math.floor(player.duration)
+          ? player.duration
           : diary.audio_duration || 0;
 
       if (initialDuration > 0) {
@@ -825,7 +850,7 @@ export default function DiaryListScreen() {
         // expo-audio 的 currentTime 和 duration 已经是秒为单位
         // ✅ 使用精确的时间值（保留小数），进度条组件会使用 Animated API 平滑更新
         const currentTimeSeconds = player.currentTime;
-        const durationSeconds = Math.floor(player.duration);
+        const durationSeconds = player.duration;
 
         // ✅ 频繁更新 currentTime（每次定时器触发都更新），进度条组件会自动平滑动画
         // ✅ 移除阈值检查，让进度条更频繁地更新，确保平滑移动
@@ -1853,12 +1878,17 @@ export default function DiaryListScreen() {
           onSeek={(seekTime) => {
             const player = soundRefs.current.get(item.diary_id);
             if (player && player.isLoaded) {
-              player.seekTo(seekTime);
               setCurrentTime((prev) => {
                 const newMap = new Map(prev);
                 newMap.set(item.diary_id, seekTime);
                 return newMap;
               });
+              setHasPlayedOnce((prev) => {
+                const newSet = new Set(prev);
+                newSet.add(item.diary_id);
+                return newSet;
+              });
+              player.seekTo(seekTime);
             }
           }}
           style={styles.audioButton}

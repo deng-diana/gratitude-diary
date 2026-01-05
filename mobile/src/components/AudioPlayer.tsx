@@ -233,7 +233,7 @@ export default function AudioPlayer({
       onPanResponderRelease: (_evt, gestureState) => {
         const relativeX = gestureState.moveX - progressBarXRef.current;
         if (progressBarWidth.current > 0) {
-          handleSeekProgress(relativeX / progressBarWidth.current, true);
+          handleSeekProgress(relativeX / progressBarWidth.current, false);
         }
         isDraggingRef.current = false;
         setIsDragging(false);

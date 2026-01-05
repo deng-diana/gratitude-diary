@@ -37,7 +37,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import PreciousMomentsIcon from "../assets/icons/preciousMomentsIcon.svg";
-import { Audio } from "expo-av";
+import { useSingleAudioPlayer } from "../hooks/useSingleAudioPlayer";
 import { getDiaryDetail } from "../services/diaryService";
 import { updateDiary } from "../services/diaryService"; // ✅ 添加
 import AudioPlayer from "../components/AudioPlayer";
@@ -88,13 +88,6 @@ export default function DiaryDetailScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 音频播放相关状态
-  const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(0);
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // ✅ 新增:编辑相关状态
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingContent, setIsEditingContent] = useState(false);
@@ -118,17 +111,6 @@ export default function DiaryDetailScreen({
   // ========== 生命周期 ==========
   useEffect(() => {
     loadDiaryDetail();
-
-    // 组件卸载时清理音频
-    return () => {
-      if (soundRef.current) {
-        soundRef.current.unloadAsync().catch(console.log);
-      }
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
-    };
   }, []);
 
   // ========== 数据加载 ==========
@@ -256,98 +238,26 @@ export default function DiaryDetailScreen({
   };
 
   // ========== 音频播放 ==========
-  const handlePlayAudio = async () => {
-    if (!diary?.audio_url) return;
+  const {
+    isPlaying,
+    currentTime,
+    duration,
+    hasPlayedOnce,
+    playPause,
+    seekTo,
+  } = useSingleAudioPlayer({
+    audioUrl: diary?.audio_url,
+    audioDuration: diary?.audio_duration,
+  });
 
+  const handlePlayPress = async () => {
     try {
-      const startProgressTimer = () => {
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-          progressIntervalRef.current = null;
-        }
-        progressIntervalRef.current = setInterval(async () => {
-          if (!soundRef.current) return;
-          const status = await soundRef.current.getStatusAsync();
-          if (status.isLoaded) {
-            if (status.durationMillis !== undefined) {
-              setDuration(Math.floor(status.durationMillis / 1000));
-            }
-            if (status.positionMillis !== undefined) {
-              setCurrentTime(status.positionMillis / 1000);
-            }
-          }
-        }, 50);
-      };
-
-      // 如果正在播放，则暂停
-      if (currentPlayingId === diary.diary_id) {
-        if (soundRef.current) {
-          await soundRef.current.pauseAsync();
-          setCurrentPlayingId(null);
-        }
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-          progressIntervalRef.current = null;
-        }
-        return;
-      }
-
-      // 停止当前播放的音频
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
-
-      // 设置音频模式
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-
-      // 创建新的音频播放器
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: diary.audio_url },
-        { shouldPlay: true }
-      );
-
-      soundRef.current = sound;
-      setCurrentPlayingId(diary.diary_id);
-      await sound.setProgressUpdateIntervalAsync(100);
-      startProgressTimer();
-
-      // 监听播放状态更新
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded) {
-          const durationMillis = status.durationMillis;
-          const positionMillis = status.positionMillis;
-
-          if (durationMillis !== undefined && positionMillis !== undefined) {
-            // ✅ 使用精确的时间值（保留小数），进度条组件会使用 Animated API 平滑更新
-            setCurrentTime(positionMillis / 1000);
-            setDuration(Math.floor(durationMillis / 1000));
-          }
-
-          // 播放完成
-          if (status.didJustFinish) {
-            setCurrentPlayingId(null);
-            setCurrentTime(0);
-            if (progressIntervalRef.current) {
-              clearInterval(progressIntervalRef.current);
-              progressIntervalRef.current = null;
-            }
-            sound.unloadAsync();
-            soundRef.current = null;
-          }
-        }
-      });
+      await playPause();
     } catch (error: any) {
       console.error("❌ 播放失败:", error);
       Alert.alert(
         t("error.playbackFailed"),
-        error.message || t("error.retryMessage")
+        error?.message || t("error.retryMessage")
       );
     }
   };
@@ -373,16 +283,6 @@ export default function DiaryDetailScreen({
 
     const formatted = formatter.format(date);
     return locale === "en" ? formatted.replace(",", "") : formatted;
-  };
-
-  const formatAudioDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  const formatProgress = (current: number, total: number): string => {
-    return `${formatAudioDuration(current)} / ${formatAudioDuration(total)}`;
   };
 
   // ========== 渲染Header ==========
@@ -769,16 +669,12 @@ export default function DiaryDetailScreen({
           <AudioPlayer
             audioUrl={diary.audio_url}
             audioDuration={diary.audio_duration}
-            isPlaying={currentPlayingId === diary.diary_id}
+            isPlaying={isPlaying}
             currentTime={currentTime}
             totalDuration={duration}
-            onPlayPress={handlePlayAudio}
-            onSeek={async (seekTime) => {
-              if (soundRef.current) {
-                await soundRef.current.setPositionAsync(seekTime * 1000);
-                setCurrentTime(seekTime);
-              }
-            }}
+            hasPlayedOnce={hasPlayedOnce}
+            onPlayPress={handlePlayPress}
+            onSeek={seekTo}
             style={styles.audioSection}
           />
         )}
