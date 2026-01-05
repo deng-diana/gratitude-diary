@@ -1,16 +1,32 @@
-# Gratitude Journal
+# thankly
 
-A modern, AI-powered gratitude journaling application built with React Native and FastAPI. Available on iOS App Store.
+A modern, AI-powered voice-first multimodal journaling application built with React Native and FastAPI. Available on iOS App Store.
 
 ## 🌟 Features
 
-- **Multi-modal Journaling**: Create entries with text, voice, or images
-- **AI-Powered Enhancement**: Automatic text polishing, title generation, and personalized feedback
-- **Multilingual Support**: AI adapts to your language (Chinese, English, Japanese, Korean, etc.)
-- **Voice Transcription**: High-accuracy speech-to-text using OpenAI Whisper
-- **Image Diaries**: Upload up to 9 images per entry with carousel view
+### Core Journaling Capabilities
+
+- **Multi-modal Journaling**: Create entries with text, voice, images, or any combination
+  - **Voice Diary**: Record your thoughts with real-time transcription
+  - **Text Diary**: Write directly with AI-powered enhancement
+  - **Image Diary**: Upload up to 9 images per entry with carousel view
+  - **Combined Modes**: Mix and match - image + text, image + voice, or image + text + voice
+
+### AI-Powered Features
+
+- **Intelligent Transcription**: High-accuracy speech-to-text using OpenAI Whisper
+- **Text Enhancement**: Automatic text polishing while preserving your original voice
+- **Smart Title Generation**: AI-generated titles that capture the essence of your entry
+- **Personalized Feedback**: Warm, empathetic AI responses using your name
+- **Multilingual Support**: AI automatically adapts to your language (Chinese, English, Japanese, Korean, etc.)
+
+### User Experience
+
+- **Real-time Progress Tracking**: Live progress updates during voice processing (0% → 100%)
 - **Audio Playback**: Built-in audio player for voice diary entries
-- **Cloud Sync**: Secure cloud storage with AWS services
+- **Image Carousel**: Beautiful image viewing experience with swipe navigation
+- **Edit & Refine**: Edit your entries anytime with instant save
+- **Cloud Sync**: Secure cloud storage with AWS services, accessible across devices
 
 ## 🏗️ Architecture
 
@@ -30,9 +46,10 @@ A modern, AI-powered gratitude journaling application built with React Native an
 - Python FastAPI
 - AWS Lambda (Serverless)
 - AWS DynamoDB (Database)
-- AWS S3 (File Storage)
+- AWS S3 (File Storage with presigned URLs)
 - AWS Cognito (Authentication)
-- OpenAI API (Whisper, GPT-4o-mini)
+- OpenAI API (Whisper for transcription, GPT-4o-mini for enhancement)
+- Async task processing with progress tracking
 
 **Infrastructure:**
 
@@ -44,26 +61,31 @@ A modern, AI-powered gratitude journaling application built with React Native an
 ## 📁 Project Structure
 
 ```
-gratitude-journal/
-├── backend/          # FastAPI backend
-│   ├── app/         # Application code
-│   │   ├── main.py  # FastAPI app entry point
-│   │   ├── routers/ # API endpoints
-│   │   ├── services/ # Business logic
-│   │   └── models/  # Pydantic models
-│   ├── Dockerfile   # Container definition
+thankly/
+├── backend/              # FastAPI backend
+│   ├── app/
+│   │   ├── main.py      # FastAPI app entry point
+│   │   ├── routers/     # API endpoints (diary, auth, account)
+│   │   ├── services/    # Business logic (OpenAI, DynamoDB, S3)
+│   │   ├── models/      # Pydantic models
+│   │   └── utils/       # Utilities (auth, transcription)
+│   ├── Dockerfile       # Container definition
+│   ├── lambda_handler.py # AWS Lambda entry point
 │   └── requirements.txt
-├── mobile/          # React Native app
+├── mobile/              # React Native app
 │   ├── src/
-│   │   ├── components/ # Reusable components
-│   │   ├── screens/    # Screen components
-│   │   ├── services/   # API services
-│   │   ├── navigation/ # Routing
-│   │   └── styles/     # Global styles
+│   │   ├── components/  # Reusable components (modals, players, etc.)
+│   │   ├── screens/     # Screen components (list, detail, login, etc.)
+│   │   ├── services/    # API services (diary, auth, account)
+│   │   ├── navigation/  # Routing configuration
+│   │   ├── hooks/       # Custom React hooks
+│   │   ├── i18n/        # Internationalization (Chinese, English)
+│   │   └── styles/      # Global styles and typography
+│   ├── app.json         # Expo configuration
 │   └── package.json
-├── docs/            # Documentation
-├── scripts/         # Deployment scripts
-└── .github/         # CI/CD workflows
+├── docs/                # Documentation
+├── scripts/             # Deployment and setup scripts
+└── .github/             # CI/CD workflows
 ```
 
 ## 🚀 Getting Started
@@ -153,11 +175,19 @@ cd backend
 
 ### AWS Services
 
-- **Lambda**: Serverless function hosting
-- **DynamoDB**: NoSQL database for diary entries
-- **S3**: Object storage for audio and images
+- **Lambda**: Serverless function hosting for backend API
+- **DynamoDB**: NoSQL database for diary entries and user data
+- **S3**: Object storage for audio and images (with presigned URLs for direct upload)
 - **Cognito**: User authentication and authorization
 - **API Gateway**: REST API endpoint
+
+### Key Technical Features
+
+- **Async Task Processing**: Background processing with real-time progress tracking via polling
+- **Presigned URLs**: Direct S3 upload bypassing Lambda's 6MB payload limit
+- **Parallel Processing**: Simultaneous S3 upload and transcription for faster processing
+- **Optimized Voice Pipeline**: Separate fast path for pure voice diaries
+- **Multimodal Support**: Seamless combination of text, voice, and images in single entries
 
 ### CI/CD
 
@@ -183,6 +213,31 @@ A pre-commit hook is configured to automatically check these settings. If you se
 - [TODO List](./TODO.md) - Upcoming features and improvements
 - [Deployment Guide](./docs/DEPLOYMENT_GUIDE.md) - Deployment instructions
 - [GitHub Actions Setup](./docs/GITHUB_ACTIONS_SETUP.md) - CI/CD configuration
+- [Quick Setup Guide](./docs/QUICK_SETUP.md) - Quick start guide
+
+## 🎯 Key Capabilities
+
+### Diary Creation Modes
+
+1. **Voice Diary**: Record your thoughts, get transcribed and enhanced automatically
+2. **Text Diary**: Write directly, get AI-enhanced version with title and feedback
+3. **Image Diary**: Upload photos (up to 9), optionally add text or voice
+4. **Multimodal Diary**: Combine any of the above - e.g., photos + voice + text
+
+### Processing Features
+
+- **Real-time Progress**: Live updates during voice processing (polling-based, 500ms interval)
+- **Parallel Processing**: S3 upload and transcription happen simultaneously
+- **Smart Optimization**: Fast path for pure voice diaries, full pipeline for multimodal entries
+- **Language Detection**: Automatic language detection and appropriate AI responses
+
+### User Experience
+
+- **Personalized AI**: Uses your name in feedback for a warm, personal touch
+- **Edit Anytime**: Edit entries after creation with instant save
+- **Audio Playback**: Listen to your voice recordings anytime
+- **Image Carousel**: Beautiful image viewing with swipe navigation
+- **Multilingual UI**: Full support for Chinese and English interfaces
 
 ## 🧪 Testing
 
@@ -211,6 +266,26 @@ Private project - All rights reserved
 ## 👤 Author: Diana Deng
 
 Built with ❤️ for capturing life's meaningful moments
+
+---
+
+## 📝 Recent Updates
+
+### Latest Features (2024-12)
+
+- ✅ **Real-time Progress Bar**: Live progress tracking for voice diary processing
+- ✅ **Multimodal Support**: Full support for image + text + voice combinations
+- ✅ **Text Input in Image Diaries**: Add text directly when creating image entries
+- ✅ **Voice Input in Image Diaries**: Record voice directly in image diary modal
+- ✅ **Optimized Processing**: Parallel processing and fast path for pure voice diaries
+- ✅ **Presigned URL Upload**: Direct S3 upload bypassing Lambda size limits
+
+### Technical Improvements
+
+- Async task processing with progress polling
+- Parallel S3 upload and transcription
+- Optimized voice processing pipeline
+- Enhanced error handling and user feedback
 
 ---
 
