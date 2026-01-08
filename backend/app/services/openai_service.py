@@ -18,7 +18,7 @@ import tempfile
 import os
 import json
 import asyncio  # 🔥 用于并行执行
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from openai import OpenAI
 import io
 import base64
@@ -351,7 +351,7 @@ class OpenAIService:
         text: str,
         user_name: Optional[str] = None,  # 用户名字，用于个性化反馈
         image_urls: Optional[List[str]] = None  # 图片URL列表，用于vision分析
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """
         🔥 重大改动：从单一模型改为混合模型 + 并行执行
         
@@ -432,18 +432,27 @@ class OpenAIService:
             feedback_task = self._call_gpt4o_mini_for_feedback(text, detected_lang, user_name, encoded_images)
             
             # 并行执行并等待结果
-            polish_result, feedback = await asyncio.gather(
+            polish_result, feedback_data = await asyncio.gather(
                 polish_task,
                 feedback_task
             )
             
             print(f"✅ 并行处理完成")
             
+            # 处理反馈结果 (兼容旧逻辑)
+            if isinstance(feedback_data, dict):
+                feedback_text = feedback_data.get("reply", "")
+                emotion_data = feedback_data
+            else:
+                feedback_text = str(feedback_data)
+                emotion_data = {"emotion": "Neutral", "confidence": 0.0}
+            
             # 合并结果
             result = {
                 "title": polish_result['title'],
                 "polished_content": polish_result['polished_content'],
-                "feedback": feedback
+                "feedback": feedback_text,
+                "emotion_data": emotion_data # ✅ 新增情绪数据
             }
             
             # 质量检查
@@ -453,6 +462,7 @@ class OpenAIService:
             print(f"  - 标题: {result['title']}")
             print(f"  - 内容长度: {len(result['polished_content'])} 字")
             print(f"  - 反馈长度: {len(result['feedback'])} 字")
+            print(f"  - 情绪: {result.get('emotion_data', {}).get('emotion', 'Unknown')}")
             
             return result
         
@@ -769,179 +779,128 @@ Output: {{"title": "A Visit to the Park", "polished_content": "I went to 公园 
         language: str,
         user_name: Optional[str] = None,
         encoded_images: Optional[List[str]] = None
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
-        调用 GPT-4o-mini 生成温暖的 AI 反馈
-        
-        📚 学习点：这个函数基于用户的原始文本生成反馈
-        - 更真实：保留用户最原始的情感表达
-        - 更快：不需要等待润色完成（可以并行执行）
-        - 更温暖：AI 回应"真实的你"而不是"完美的文字"
-        
-        为什么选择 GPT-4o-mini？
-        - 共情能力稳定
-        - 中英文表达自然
-        - 与润色模型统一，方便维护
+        调用 GPT-4o-mini 生成温暖的 AI 反馈 + 情绪分析
         
         返回:
-            温暖的反馈文字（简洁有力，不超过用户输入长度）
+            {
+                "reply": "温暖的反馈文字",
+                "emotion": "Joyful",
+                "confidence": 0.9,
+                "rationale": "分析理由..."
+            }
         """
         try:
-            print(f"💬 GPT-4o-mini: 开始生成反馈（基于原始文本）...")
+            print(f"💬 GPT-4o-mini: 开始生成反馈 + 情绪分析...")
             print(f"👤 用户名字: {user_name if user_name else '未提供'}")
             
             # 计算用户输入长度，用于动态调整反馈长度
             user_text_length = len(text.strip())
-            # 反馈长度策略：不超过用户输入长度，但最短不少于20字（中文）或15词（英文）
             max_feedback_length = max(user_text_length, 20 if language == "Chinese" else 15)
             
-            # 构建个性化的名字称呼
-            name_greeting = ""
-            if user_name and user_name.strip():
-                # 提取名字（去掉可能的空格和特殊字符）
-                import re
-                first_name = re.split(r'\s+', user_name.strip())[0]
-                if language == "Chinese":
-                    name_greeting = f"，{first_name}"
-                else:
-                    name_greeting = f", {first_name}"
-            
-            # 构建统一的系统提示词 (支持自动语言检测)
-            system_prompt = f"""You are a warm, empathetic listener responding to a diary entry.
+            # 构建统一的系统提示词
+            # 情绪列表：与前端 EmotionType 保持严格一致
+            # Joyful, Grateful, Proud, Peaceful, Reflective, Down, Anxious, Venting, Drained, Neutral
+            system_prompt = f"""You are a warm, empathetic listener AND an emotion analyst.
 
 LANGUAGE RULES:
-1. **Detect and Follow**: Detect the user's language from their input (text or voice transcription) and respond in THE SAME LANGUAGE (e.g., if they write in Chinese, respond in Chinese; if Japanese, respond in Japanese).
-2. **Fallback**: If the user's input is empty or only contains images, respond in {language}.
-3. **Consistency**: NEVER translate. Match the emotional tone and language exactly.
+1. Detect and Follow: Respond in THE SAME LANGUAGE as the user's input.
+2. Fallback: If input is empty/images only, respond in {language}.
+3. Consistency: NEVER translate. Match the emotional tone.
 
-⚠️ CRITICAL RULES - YOU MUST FOLLOW:
-1. **NEVER ask questions**: Do not ask "How are you?" or "What's on your mind?". No question marks allowed.
-2. **Warm Listener**: Your role is to listen and provide emotional resonance, NOT to start a conversation.
-3. **Short and Powerful**: 1-2 sentences maximum. Keep it concise.
-4. **Greeting**: {"Your response MUST start with '" + user_name + (", " if language == "English" else "，") + "'." if user_name else "Start your response directly."}
+⚠️ CRITICAL RULES FOR REPLY:
+1. **NEVER ask questions**: Do not ask "How are you?" or "What's on your mind?".
+2. **Warm Listener**: Acknowledge their feelings with warmth and resonance.
+3. **Short and Powerful**: 1-2 sentences. Concise.
+4. **Greeting**: {"Start response with '" + user_name + (", " if language == "English" else "，") + "'." if user_name else "Start directly."}
 
-Your style:
-- Like a close friend, genuine and empathetic.
-- Acknowledge their feelings with warmth.
-- Natural, conversational, intimate tone.
+📊 EMOTION ANALYSIS RULES:
+Analyze the user's emotion from the text/images and choose ONE from this STRICT list:
+[Joyful, Grateful, Proud, Peaceful, Reflective, Down, Anxious, Venting, Drained, Neutral]
 
-Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
+Usage Guide:
+- **Reflective**: For deep thoughts, self-reflection, insights.
+- **Neutral**: For task lists, daily plans, objective records, or routine logs (e.g., "Today I did X, Y, Z").
+- **Peaceful**: For calm, relaxed, meditative moments.
+- **Venting**: For frustration, angry ranting.
+- **Drained**: For exhaustion, tiredness.
+- **Down**: For sadness, disappointment.
 
-            # 构建个性化的用户提示
+Response format (JSON ONLY):
+{{
+  "reply": "Your warm response text here...",
+  "emotion": "Selected Emotion from list",
+  "confidence": 0.9,
+  "rationale": "Short reason for analysis"
+}}"""
+
+            # 构建消息
             user_content = []
-            
-            # 如果有图片，添加图片到消息中（使用vision能力）
             if encoded_images and len(encoded_images) > 0:
-                print(f"🖼️ 添加 {len(encoded_images)} 张图片到 Vision 反馈请求 (Low-res 模式)...")
                 for image_data in encoded_images:
                     user_content.append({
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_data}",
-                            "detail": "low"
-                        }
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}", "detail": "low"}
                     })
-                
-                # 添加文字内容
-                # 添加文字内容 (使用中性指令，避免语言诱导)
-                if text.strip():
-                    text_content = f"The user shared this (including images):\n\n{text}\n\nRespond with warmth and empathy in the SAME LANGUAGE as the user's input (NEVER ask questions):"
-                else:
-                    text_content = f"The user shared some images. Feel the atmosphere and respond with warmth and empathy in {language} (NEVER ask questions):"
-                
-                user_content.append({
-                    "type": "text",
-                    "text": text_content
-                })
-                user_prompt = user_content
+                user_content.append({"type": "text", "text": f"Analyze emotion and respond to this (including images):\n\n{text}"})
+                messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
             else:
-                # 只有文字，使用纯文本
-                user_prompt = f"The user shared this:\n\n{text}\n\nRespond with warmth and empathy in the SAME LANGUAGE as the user's input (NEVER ask questions):"
-            
-            # 调用 OpenAI Chat Completions API
-            # 动态调整 max_tokens：根据用户输入长度，预留昵称与提示空间
-            estimated_output_length = max_feedback_length + 40
-            image_tokens = len(encoded_images) * 85 if encoded_images else 0
-            max_tokens = max(200, min(int(estimated_output_length * 1.2) + image_tokens, 800))
+                messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Analyze emotion and respond to this:\n\n{text}"}]
 
-            print(f"📤 GPT-4o-mini: 发送请求到 OpenAI...")
-            print(f"   模型: {self.MODEL_CONFIG['sonnet']}")
-            print(f"   用户名字: {user_name if user_name else '未提供'}")
-            print(f"   图片数量: {len(encoded_images) if encoded_images else 0}")
-            print(f"   System prompt 前100字符: {system_prompt[:100]}...")
-
-            # 构建消息
-            if encoded_images and len(encoded_images) > 0:
-                # 使用vision格式（包含图片）
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
-            else:
-                # 纯文本格式
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ]
+            # 增加 max_tokens 以容纳 JSON
+            estimated_output_length = max_feedback_length + 200 
+            max_tokens = max(300, min(estimated_output_length, 1000))
 
             response = await asyncio.to_thread(
                 self.openai_client.chat.completions.create,
-                model=self.MODEL_CONFIG["sonnet"],
+                model=self.MODEL_CONFIG["sonnet"], # 继续使用配置好的模型
                 messages=messages,
                 temperature=0.7,
                 max_tokens=max_tokens,
+                response_format={"type": "json_object"}
             )
 
-            content = response.choices[0].message.content if response.choices else ""
+            content = response.choices[0].message.content
             if not content:
                 raise ValueError("OpenAI 返回空响应")
 
-            feedback = content.strip()
-            print(f"✅ GPT-4o-mini: 收到反馈，长度 {len(feedback)} 字符")
-            
-            if user_name and user_name.strip():
-                trimmed_feedback = feedback.lstrip()
-                starts_with_name = trimmed_feedback.lower().startswith(user_name.lower())
+            try:
+                result = json.loads(content)
+                reply = result.get("reply", "").strip()
+                emotion = result.get("emotion", "Neutral")
                 
-                # 智能分隔符：根据反馈内容判断用中文逗号还是英文逗号
-                # CJK 字符（中日韩）使用中文逗号，其他使用英文逗号
-                import re
-                has_cjk = bool(re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', trimmed_feedback))
-                separator = "，" if has_cjk else ", "
+                # 名字前缀检查
+                if user_name and user_name.strip():
+                    trimmed_reply = reply.lstrip()
+                    if not trimmed_reply.lower().startswith(user_name.lower()):
+                        import re
+                        has_cjk = bool(re.search(r'[\u4e00-\u9fff]', trimmed_reply))
+                        separator = "，" if has_cjk else ", "
+                        reply = f"{user_name}{separator}{trimmed_reply}"
                 
-                if not starts_with_name:
-                    print(
-                        f"⚠️ 反馈未以名字开头，自动修正: user_name={user_name}, feedback='{feedback}'"
-                    )
-                    feedback = f"{user_name}{separator}{trimmed_feedback}"
-                    print(f"✅ 修正后: {feedback[:50]}...")
-            
-            print(f"✅ GPT-4o-mini: 反馈生成完成")
-            print(f"   反馈: {feedback[:50]}...")
-            
-            return feedback
+                result["reply"] = reply
+                print(f"✅ 反馈生成: {reply[:30]}... (Mood: {emotion})")
+                return result
+                
+            except json.JSONDecodeError:
+                print("⚠️ JSON 解析失败，回退到纯文本处理")
+                return {
+                    "reply": content.strip(),
+                    "emotion": "Neutral", 
+                    "confidence": 0.5,
+                    "rationale": "Extracted from non-JSON response"
+                }
         
         except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e)
-            print(f"❌ GPT-4o-mini 反馈调用失败: {error_type}: {error_msg}")
-            
-            # 详细错误信息
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"📍 GPT-4o-mini 反馈完整错误堆栈:")
-            print(error_trace)
-            
-            # 检查常见错误类型
-            if "RateLimit" in error_type or "rate limit" in error_msg.lower():
-                print(f"⚠️ OpenAI 限流: 请求频率过高，建议稍后重试或调整速率")
-            elif "AuthenticationError" in error_type or "InvalidApiKey" in error_type:
-                print(f"⚠️ OpenAI API Key 错误: 请检查 OPENAI_API_KEY 环境变量")
-            elif "APIConnectionError" in error_type:
-                print(f"⚠️ OpenAI API 连接错误: 请检查网络连接")
-            
-            # 降级方案
-            return "感谢分享你的这一刻。" if language == "Chinese" else "Thanks for sharing this moment."
+            print(f"❌ 反馈生成失败: {e}")
+            fallback_reply = "感谢分享你的这一刻。" if language == "Chinese" else "Thanks for sharing this moment."
+            return {
+                "reply": fallback_reply,
+                "emotion": "Neutral",
+                "confidence": 0.0,
+                "rationale": "Fallback due to error"
+            }
     
     # ========================================================================
     # 验证和降级逻辑（保持不变）
@@ -971,6 +930,7 @@ Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
         title = (result.get("title", "") or "").strip()
         polished = (result.get("polished_content", "") or "").strip()
         feedback = (result.get("feedback", "") or "").strip()
+        emotion_data = result.get("emotion_data", {"emotion": "Neutral"}) # ✅ 保留情绪数据
         
         # 🔥 强化语言一致性验证：更准确地检测和修正
         title_has_chinese = bool(re.search(r'[\u4e00-\u9fff]', title))
@@ -1166,10 +1126,11 @@ Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
         return {
             "title": title,
             "polished_content": polished or original_text,
-            "feedback": feedback or default_feedback
+            "feedback": feedback or default_feedback,
+            "emotion_data": emotion_data # ✅ 返回情绪数据
         }
     
-    def _create_fallback_result(self, text: str) -> Dict[str, str]:
+    def _create_fallback_result(self, text: str) -> Dict[str, Any]:
         """
         创建降级结果
         
@@ -1185,7 +1146,8 @@ Response format: Plain text only (NO JSON, NO quotes, NO markdown)."""
         return {
             "title": "今日记录" if is_chinese else "Today's Reflection",
             "polished_content": text,
-            "feedback": "感谢分享。" if is_chinese else "Thanks for sharing."
+            "feedback": "感谢分享。" if is_chinese else "Thanks for sharing.",
+            "emotion_data": {"emotion": "Reflective", "confidence": 0.5} # ✅ 默认情绪
         }
     
     # ========================================================================

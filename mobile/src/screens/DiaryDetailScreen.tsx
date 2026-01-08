@@ -41,6 +41,7 @@ import { useSingleAudioPlayer } from "../hooks/useSingleAudioPlayer";
 import { getDiaryDetail } from "../services/diaryService";
 import { updateDiary } from "../services/diaryService"; // ✅ 添加
 import AudioPlayer from "../components/AudioPlayer";
+import { EmotionCapsule } from "../components/EmotionCapsule"; // ✅ 导入情绪胶囊组件
 
 // ============================================================================
 // 🌍 导入翻译函数
@@ -67,6 +68,7 @@ interface Diary {
   audio_url?: string;
   audio_duration?: number;
   image_urls?: string[]; // 图片URL数组
+  emotion_data?: { emotion: string; [key: string]: any }; // ✅ 情感数据
 }
 
 interface DiaryDetailScreenProps {
@@ -705,22 +707,37 @@ export default function DiaryDetailScreen({
               accessibilityHint={t("accessibility.button.editHint")}
               accessibilityRole="button"
             >
-              <Text
-                style={[
-                  styles.titleText,
-                  {
-                    fontFamily: getFontFamilyForText(
-                      diary.title,
-                      isChineseTitle ? "bold" : "semibold"
-                    ),
-                    fontWeight: isChineseTitle ? "700" : "600",
-                    fontSize: isChineseTitle ? 16 : 18,
-                    lineHeight: isChineseTitle ? 26 : 24,
-                  },
-                ]}
-              >
-                {diary.title}
-              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <Text
+                  style={[
+                    styles.titleText,
+                    {
+                      fontFamily: getFontFamilyForText(
+                        diary.title,
+                        isChineseTitle ? "bold" : "semibold"
+                      ),
+                      fontWeight: isChineseTitle ? "700" : "600",
+                      fontSize: isChineseTitle ? 16 : 18,
+                      lineHeight: isChineseTitle ? 26 : 24,
+                      flex: 1, // ✅ 让标题占据剩余空间，避免挤压标签
+                    },
+                  ]}
+                >
+                  {diary.title}
+                </Text>
+
+                {/* ✅ 显示情绪标签 */}
+                {diary.emotion_data?.emotion && (
+                  <View style={{ marginTop: 2 }}>
+                    <EmotionCapsule 
+                      emotion={diary.emotion_data.emotion}
+                      language={diary.language}
+                      content={diary.polished_content || diary.original_content}
+                      // size="small"
+                    />
+                  </View>
+                )}
+              </View>
             </TouchableOpacity>
           )}
 

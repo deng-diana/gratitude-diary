@@ -7,7 +7,8 @@ export type EmotionType =
   | 'Down' 
   | 'Anxious' 
   | 'Venting' 
-  | 'Drained';
+  | 'Drained'
+  | 'Neutral'; // ✅ Add Neutral
 
 export interface EmotionConfig {
   labelEn: string;
@@ -25,7 +26,8 @@ export const EMOTION_MAP: Record<EmotionType, EmotionConfig> = {
   
   // Neutrals
   Peaceful:   { labelEn: 'Peaceful',   labelZh: '平静', color: '#D1F6EA', darkText: true },
-  Reflective: { labelEn: 'Reflective', labelZh: '思考', color: '#FFECD1', darkText: true },
+  Reflective: { labelEn: 'Reflective', labelZh: '感悟', color: '#FFECD1', darkText: true }, // ✅ Changed to 感悟
+  Neutral:    { labelEn: 'Routine',    labelZh: '日常', color: '#F2F2F2', darkText: true }, // ✅ Added Neutral (Routine/日常)
   
   // Negatives / Release
   Down:       { labelEn: 'Down',       labelZh: '低落', color: '#D8E8FF', darkText: true },
@@ -36,3 +38,9 @@ export const EMOTION_MAP: Record<EmotionType, EmotionConfig> = {
 
 // 默认兜底配置
 export const DEFAULT_EMOTION: EmotionConfig = EMOTION_MAP.Reflective;
+
+export interface EmotionData {
+  emotion: string;
+  confidence: number;
+  rationale?: string;
+}

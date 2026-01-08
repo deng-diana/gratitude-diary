@@ -35,6 +35,7 @@ import { t } from "../i18n";
 import { Typography, getFontFamilyForText } from "../styles/typography";
 import ProcessingModal from "./ProcessingModal";
 import DiaryResultView from "./DiaryResultView";
+import { EmotionData } from "../types/emotion";
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -54,6 +55,7 @@ export default function TextInputModal({
   const [polishedContent, setPolishedContent] = useState("");
   const [title, setTitle] = useState("");
   const [aiFeedback, setAiFeedback] = useState("");
+  const [emotionData, setEmotionData] = useState<EmotionData | undefined>(undefined);
 
   // 处理状态
   const [isProcessing, setIsProcessing] = useState(false);
@@ -126,6 +128,7 @@ export default function TextInputModal({
       setPolishedContent("");
       setTitle("");
       setAiFeedback("");
+      setEmotionData(undefined);
       setIsProcessing(false);
       setShowResult(false);
       setIsEditing(false);
@@ -291,6 +294,7 @@ export default function TextInputModal({
         );
         setTitle(diary.title || "");
         setAiFeedback(diary.ai_feedback || "");
+        setEmotionData(diary.emotion_data); // ✅ 设置情绪数据
         setCurrentDiaryId(diary.diary_id);
 
         console.log("📊 设置的结果数据:");
@@ -381,6 +385,7 @@ export default function TextInputModal({
       setPolishedContent("");
       setTitle("");
       setAiFeedback("");
+      setEmotionData(undefined);
       setCurrentDiaryId(null);
       setIsProcessing(false);
       setProcessingStep(0);
@@ -458,6 +463,7 @@ export default function TextInputModal({
                 setPolishedContent("");
                 setTitle("");
                 setAiFeedback("");
+                setEmotionData(undefined);
                 setIsEditing(false);
                 setHasChanges(false);
                 setEditedContent("");
@@ -478,6 +484,7 @@ export default function TextInputModal({
     setPolishedContent("");
     setTitle("");
     setAiFeedback("");
+    setEmotionData(undefined);
     setIsEditing(false);
     setHasChanges(false);
     setEditedContent("");
@@ -687,6 +694,7 @@ export default function TextInputModal({
                   title={title}
                   polishedContent={polishedContent}
                   aiFeedback={aiFeedback}
+                  emotionData={emotionData} // ✅ 传递情绪数据
                   isEditing={isEditing}
                   editedContent={editedContent}
                   onStartEditing={startEditing}

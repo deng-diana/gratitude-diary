@@ -41,6 +41,7 @@ import {
 } from "react-native-gesture-handler";
 
 import AudioPlayer from "../components/AudioPlayer";
+import { EmotionCapsule } from "../components/EmotionCapsule";
 const { width } = Dimensions.get("window");
 
 // ============================================================================
@@ -1311,19 +1312,33 @@ export default function RecordingModal({
                   accessibilityHint={t("accessibility.button.editHint")}
                   accessibilityRole="button"
                 >
-                  <Text
-                    style={[
-                      styles.resultTitleText,
-                      {
-                        fontFamily: getFontFamilyForText(
-                          resultDiary.title,
-                          "bold"
-                        ),
-                      },
-                    ]}
-                  >
-                    {resultDiary.title}
-                  </Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                    <Text
+                      style={[
+                        styles.resultTitleText,
+                        {
+                          fontFamily: getFontFamilyForText(
+                            resultDiary.title,
+                            "bold"
+                          ),
+                          flex: 1, // ✅ 避免挤压
+                        },
+                      ]}
+                    >
+                      {resultDiary.title}
+                    </Text>
+
+                    {/* ✅ 显示情绪标签 */}
+                    {resultDiary.emotion_data?.emotion && (
+                      <View style={{ marginTop: 2 }}>
+                        <EmotionCapsule 
+                          emotion={resultDiary.emotion_data.emotion}
+                          language={resultDiary.language}
+                          content={resultDiary.polished_content}
+                        />
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
               )}
 

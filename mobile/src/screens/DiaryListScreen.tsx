@@ -1528,143 +1528,148 @@ export default function DiaryListScreen() {
         accessibilityHint={t("accessibility.button.viewDetailHint")}
         accessibilityRole="button"
       >
-        {/* ✅ 情绪光晕效果 */}
+        {/* ✅ 情绪光晕效果 - 放在最外层，不受 Padding 影响 */}
         <EmotionGlow emotion={item.emotion_data?.emotion} />
-        {/* 纯图片日记：只显示图片 */}
-        {/* DEBUG: {item.emotion_data?.emotion} */}
-        {isImageOnly ? (
-          <>
-            {/* 图片缩略图 */}
-            {item.image_urls && item.image_urls.length > 0 && (
-              <View
-                style={[styles.imageGrid, { marginTop: 0, marginBottom: 0 }]}
-              >
-                {renderImageGrid(item.image_urls)}
-              </View>
-            )}
-          </>
-        ) : (
-          <>
-            {/* 标题 */}
-            {item.title && item.title.trim() !== "" && (
-              <View style={{ position: 'relative', paddingRight: item.emotion_data?.emotion ? 80 : 0, marginBottom: 8, zIndex: 10 }}>
+        
+        {/* ✅ 内容容器 - 提供 Padding */}
+        <View style={styles.cardContentContainer} pointerEvents="box-none">
+
+          {/* 纯图片日记：只显示图片 */}
+          {/* DEBUG: {item.emotion_data?.emotion} */}
+          {isImageOnly ? (
+            <>
+              {/* 图片缩略图 */}
+              {item.image_urls && item.image_urls.length > 0 && (
+                <View
+                  style={[styles.imageGrid, { marginTop: 0, marginBottom: 0 }]}
+                >
+                  {renderImageGrid(item.image_urls)}
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {/* 标题 */}
+              {item.title && item.title.trim() !== "" && (
+                <View style={{ position: 'relative', paddingRight: item.emotion_data?.emotion ? 80 : 0, marginBottom: 8, zIndex: 10 }}>
+                  <Text
+                    style={[
+                      styles.cardTitle,
+                      {
+                        fontFamily: titleFontFamily,
+                        fontWeight: isChineseTitle ? "700" : "600",
+                        fontSize: isChineseTitle ? 18 : 18,
+                        lineHeight: isChineseTitle ? 26 : 24,
+                      },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {item.title}
+                  </Text>
+                  {/* ✅ 情绪标签 - 绝对定位在右上角 */}
+                  {item.emotion_data?.emotion && (
+                    <View style={{ position: 'absolute', top: 0, right: 0 }}>
+                      <EmotionCapsule 
+                        emotion={item.emotion_data.emotion} 
+                        language={item.language}
+                        content={item.polished_content || item.original_content}
+                      />
+                    </View>
+                  )}
+                </View>
+              )}
+  
+              {/* 内容预览 */}
+              {contentText && contentText.trim() !== "" && (
                 <Text
                   style={[
-                    styles.cardTitle,
+                    styles.cardContent,
                     {
-                      fontFamily: titleFontFamily,
-                      fontWeight: isChineseTitle ? "700" : "600",
-                      fontSize: isChineseTitle ? 18 : 18,
-                      lineHeight: isChineseTitle ? 26 : 24,
+                      fontFamily: contentFontFamily,
+                      fontSize: isChineseContent ? 16 : 16, // ✅ 中文字号从 14 增加到 16
+                      lineHeight: isChineseContent ? 28 : 24, // ✅ 中文行高 28px
                     },
                   ]}
-                  numberOfLines={2}
+                  numberOfLines={3}
                 >
-                  {item.title}
+                  {contentText}
                 </Text>
-                {/* ✅ 情绪标签 - 绝对定位在右上角 */}
-                {item.emotion_data?.emotion && (
-                  <View style={{ position: 'absolute', top: 0, right: 0 }}>
-                    <EmotionCapsule 
-                      emotion={item.emotion_data.emotion} 
-                      language={item.language}
-                      content={item.polished_content || item.original_content}
-                    />
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* 内容预览 */}
-            {contentText && contentText.trim() !== "" && (
+              )}
+  
+              {/* 图片缩略图（如果有） */}
+              {item.image_urls && item.image_urls.length > 0 && (
+                <View
+                  style={[
+                    styles.imageGrid,
+                    item.audio_url ? styles.imageGridWithAudio : null,
+                  ]}
+                >
+                  {renderImageGrid(item.image_urls)}
+                </View>
+              )}
+            </>
+          )}
+  
+          {/* ✅ 使用统一的音频播放器组件 */}
+          <AudioPlayer
+            audioUrl={item.audio_url}
+            audioDuration={item.audio_duration}
+            isPlaying={currentPlayingId === item.diary_id}
+            currentTime={currentTime.get(item.diary_id) || 0}
+            totalDuration={
+              duration.get(item.diary_id) || item.audio_duration || 0
+            }
+            hasPlayedOnce={hasPlayedOnce.has(item.diary_id)}
+            onPlayPress={() => handlePlayAudio(item)}
+            onSeek={(seekTime) => {
+              const player = soundRefs.current.get(item.diary_id);
+              if (player && player.isLoaded) {
+                setCurrentTime((prev) => {
+                  const newMap = new Map(prev);
+                  newMap.set(item.diary_id, seekTime);
+                  return newMap;
+                });
+                setHasPlayedOnce((prev) => {
+                  const newSet = new Set(prev);
+                  newSet.add(item.diary_id);
+                  return newSet;
+                });
+                player.seekTo(seekTime);
+              }
+            }}
+            style={styles.audioButton}
+          />
+  
+          {/* 日期 + 三点菜单图标 - 移到底部 */}
+          <View style={styles.cardFooter}>
+            <View style={styles.dateContainer}>
               <Text
                 style={[
-                  styles.cardContent,
+                  styles.cardDate,
                   {
-                    fontFamily: contentFontFamily,
-                    fontSize: isChineseContent ? 16 : 16, // ✅ 中文字号从 14 增加到 16
-                    lineHeight: isChineseContent ? 28 : 24, // ✅ 中文行高 28px
+                    fontFamily: getFontFamilyForText(displayDate, "regular"),
                   },
                 ]}
-                numberOfLines={3}
               >
-                {contentText}
+                {displayDate}
               </Text>
-            )}
-
-            {/* 图片缩略图（如果有） */}
-            {item.image_urls && item.image_urls.length > 0 && (
-              <View
-                style={[
-                  styles.imageGrid,
-                  item.audio_url ? styles.imageGridWithAudio : null,
-                ]}
-              >
-                {renderImageGrid(item.image_urls)}
-              </View>
-            )}
-          </>
-        )}
-
-        {/* ✅ 使用统一的音频播放器组件 */}
-        <AudioPlayer
-          audioUrl={item.audio_url}
-          audioDuration={item.audio_duration}
-          isPlaying={currentPlayingId === item.diary_id}
-          currentTime={currentTime.get(item.diary_id) || 0}
-          totalDuration={
-            duration.get(item.diary_id) || item.audio_duration || 0
-          }
-          hasPlayedOnce={hasPlayedOnce.has(item.diary_id)}
-          onPlayPress={() => handlePlayAudio(item)}
-          onSeek={(seekTime) => {
-            const player = soundRefs.current.get(item.diary_id);
-            if (player && player.isLoaded) {
-              setCurrentTime((prev) => {
-                const newMap = new Map(prev);
-                newMap.set(item.diary_id, seekTime);
-                return newMap;
-              });
-              setHasPlayedOnce((prev) => {
-                const newSet = new Set(prev);
-                newSet.add(item.diary_id);
-                return newSet;
-              });
-              player.seekTo(seekTime);
-            }
-          }}
-          style={styles.audioButton}
-        />
-
-        {/* 日期 + 三点菜单图标 - 移到底部 */}
-        <View style={styles.cardFooter}>
-          <View style={styles.dateContainer}>
-            <Text
-              style={[
-                styles.cardDate,
-                {
-                  fontFamily: getFontFamilyForText(displayDate, "regular"),
-                },
-              ]}
+            </View>
+  
+            {/* 三点菜单图标 */}
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation(); // 阻止事件冒泡，避免触发整个卡片的点击
+                handleDiaryOptions(item);
+              }}
+              style={styles.optionsButton}
+              accessibilityLabel={t("home.diaryOptionsButton")}
+              accessibilityHint={t("accessibility.button.editHint")}
+              accessibilityRole="button"
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              {displayDate}
-            </Text>
+              <MoreIcon width={24} height={24} />
+            </TouchableOpacity>
           </View>
-
-          {/* 三点菜单图标 */}
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation(); // 阻止事件冒泡，避免触发整个卡片的点击
-              handleDiaryOptions(item);
-            }}
-            style={styles.optionsButton}
-            accessibilityLabel={t("home.diaryOptionsButton")}
-            accessibilityHint={t("accessibility.button.editHint")}
-            accessibilityRole="button"
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <MoreIcon width={24} height={24} />
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -2123,9 +2128,9 @@ const styles = StyleSheet.create({
   diaryCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
-    padding: 20,
-    paddingTop: 20,
-    paddingBottom: 8,
+    // padding: 20, // ❌ 移除父容器 Padding，防止裁剪光晕
+    // paddingTop: 20,
+    // paddingBottom: 8,
     marginHorizontal: 20,
     marginBottom: 12,
     // ✅ 自然轻盈的弥散投影
@@ -2137,6 +2142,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 1, // 半透明，保持轻盈感
     shadowRadius: 10, // 较大的模糊半径，营造弥散效果
     elevation: 3, // Android 阴影（数值较小，保持轻盈）
+    // overflow: "hidden", // ❌ 移除，否则 iOS 阴影会消失！圆角由内部组件匹配。
+  },
+
+  // ✅ 新增：内容内边距容器
+  cardContentContainer: {
+    padding: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+    zIndex: 1, // 确保内容在光晕之上
   },
 
   cardFooter: {
@@ -2153,6 +2167,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
+
 
   cardDate: {
     ...Typography.caption,

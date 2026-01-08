@@ -8,6 +8,7 @@ import apiService from "./apiService";
 import { getAccessToken } from "./authService"; // ← 需要这个
 import { refreshAccessToken } from "./authService"; // ← 自动刷新
 import { API_BASE_URL } from "../config/aws-config"; // ← 需要这个
+import { EmotionData } from "../types/emotion";
 import * as FileSystem from "expo-file-system";
 
 type PreparedImage = {
@@ -98,7 +99,7 @@ export interface Diary {
   audio_url?: string; // ← 新增：音频URL（可选）
   audio_duration?: number; // ← 新增：音频时长（可选）
   image_urls?: string[]; // ← 新增：图片URL数组（可选，最多9张）
-  emotion_data?: { emotion: string; [key: string]: any }; // ✅ 新增：情感数据
+  emotion_data?: EmotionData; // ✅ 更新：使用严格类型的情感数据
 }
 
 /**

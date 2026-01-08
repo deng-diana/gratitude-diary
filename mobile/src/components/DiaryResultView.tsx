@@ -16,10 +16,14 @@ import PreciousMomentsIcon from "../assets/icons/preciousMomentsIcon.svg";
 import { Typography, getFontFamilyForText } from "../styles/typography";
 import { t } from "../i18n";
 
+import { EmotionCapsule } from "./EmotionCapsule";
+import { EmotionData } from "../types/emotion";
+
 interface DiaryResultViewProps {
   title: string;
   polishedContent: string;
   aiFeedback: string;
+  emotionData?: EmotionData; // ✅ 新增
   isEditing: boolean;
   editedContent: string;
   onStartEditing: () => void;
@@ -30,27 +34,45 @@ export default function DiaryResultView({
   title,
   polishedContent,
   aiFeedback,
+  emotionData,
   isEditing,
   editedContent,
   onStartEditing,
   onContentChange,
 }: DiaryResultViewProps) {
+  // 获取当前语言环境，传给 EmotionCapsule
+  const currentLanguage = t("common.save") === "Save" ? "en" : "zh";
+
   return (
     <>
       {/* 标题和内容卡片 */}
       <View style={styles.resultDiaryCard}>
-        {/* 标题 */}
+        {/* 标题 + 情绪标签 */}
         {!!title && !isEditing && (
-          <Text
-            style={[
-              styles.resultTitleText,
-              {
-                fontFamily: getFontFamilyForText(title, "bold"),
-              },
-            ]}
-          >
-            {title}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text
+              style={[
+                styles.resultTitleText,
+                {
+                  fontFamily: getFontFamilyForText(title, "bold"),
+                  flex: 1, // 让标题占据剩余空间
+                  marginBottom: 0, // 布局由 titleRow 控制
+                },
+              ]}
+            >
+              {title}
+            </Text>
+            {/* ✅ 显示情绪标签 */}
+            {emotionData?.emotion && (
+              <View style={{ marginLeft: 8 }}>
+                <EmotionCapsule
+                  emotion={emotionData.emotion}
+                  language={currentLanguage}
+                  content={polishedContent}
+                />
+              </View>
+            )}
+          </View>
         )}
 
         {/* 内容 - 可点击编辑 */}
@@ -136,12 +158,19 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
+  // ✅ 新增：标题行布局
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+
   resultTitleText: {
     ...Typography.diaryTitle,
     fontSize: 16,
     color: "#1A1A1A",
     letterSpacing: -0.5,
-    marginBottom: 12,
+    // marginBottom: 12, // ✅ 移至 titleRow 控制
   },
 
   resultContentText: {

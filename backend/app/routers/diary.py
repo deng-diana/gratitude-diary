@@ -999,7 +999,8 @@ async def create_voice_diary_stream(
                 language=ai_result.get("language", "zh"),
                 title=ai_result["title"],
                 audio_url=audio_url,
-                audio_duration=duration
+                audio_duration=duration,
+                emotion_data=ai_result.get("emotion_data") # ✅ 传递情感数据
             )
             
             # ============================================
@@ -1514,7 +1515,8 @@ async def create_image_only_diary(
                 language=ai_result.get("language", "zh"),
                 title=ai_result["title"],
                 audio_url=None,
-                image_urls=image_urls
+                image_urls=image_urls,
+                emotion_data=ai_result.get("emotion_data") # ✅ 传递情感数据
             )
             
             print(f"✅ Image diary with text created: {diary['diary_id']}")
