@@ -113,6 +113,28 @@ export function useVoiceRecording(
     return () => subscription.remove();
   }, [startDurationTimer]);
 
+  /**
+   * 安全清理录音对象的辅助函数
+   * 统一处理录音对象的清理逻辑，避免代码重复
+   */
+  const cleanupRecordingObject = async (recording: Audio.Recording | null): Promise<void> => {
+    if (!recording) return;
+    
+    try {
+      const status = await recording.getStatusAsync();
+      if (status.isLoaded) {
+        if (status.isRecording) {
+          await recording.stopAndUnloadAsync();
+        } else {
+          await recording.unloadAsync();
+        }
+      }
+    } catch (error) {
+      // 清理失败时忽略错误，确保继续执行
+      console.log("清理录音对象时出错（可忽略）:", error);
+    }
+  };
+
   const configureAudioMode = async () => {
     try {
       // ✅ 关键修复：先设置音频模式为录音模式
@@ -158,33 +180,7 @@ export function useVoiceRecording(
       // ✅ 关键修复：在创建新录音之前，先清理之前的录音对象
       // 这可以防止 "Only one Recording object can be prepared at a given time" 错误
       if (recordingRef.current) {
-        try {
-          const status = await recordingRef.current.getStatusAsync();
-          // ✅ 更彻底的清理：无论什么状态，都尝试停止并卸载
-          if (status.isLoaded) {
-            if (status.isRecording) {
-              await recordingRef.current.stopAndUnloadAsync();
-            } else if (status.canRecord) {
-              // 如果已经准备好但还没开始录音，也需要卸载
-              await recordingRef.current.unloadAsync();
-            } else {
-              // 其他状态也尝试卸载
-              try {
-                await recordingRef.current.unloadAsync();
-              } catch (e) {
-                // 如果卸载失败，尝试停止并卸载
-                try {
-                  await recordingRef.current.stopAndUnloadAsync();
-                } catch (e2) {
-                  // 如果还是失败，忽略错误
-                }
-              }
-            }
-          }
-        } catch (error) {
-          console.log("清理之前的录音对象时出错（可忽略）:", error);
-          // ✅ 即使出错，也确保 ref 被清空
-        }
+        await cleanupRecordingObject(recordingRef.current);
         recordingRef.current = null;
         // ✅ 额外等待，确保录音对象完全释放
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -199,22 +195,8 @@ export function useVoiceRecording(
 
       // ✅ 如果全局已有录音对象（来自其他组件），先清理
       if (globalRecordingRef && globalRecordingRef !== recordingRef.current) {
-        try {
-          const status = await globalRecordingRef.getStatusAsync();
-          if (status.isLoaded) {
-            if (status.isRecording) {
-              await globalRecordingRef.stopAndUnloadAsync();
-            } else if (status.canRecord) {
-              await globalRecordingRef.unloadAsync();
-            } else {
-              await globalRecordingRef.unloadAsync();
-            }
-          }
-        } catch (error) {
-          console.log("清理全局录音对象时出错（可忽略）:", error);
-        } finally {
-          globalRecordingRef = null;
-        }
+        await cleanupRecordingObject(globalRecordingRef);
+        globalRecordingRef = null;
       }
 
       // ✅ 清理之前的定时器
@@ -263,6 +245,23 @@ export function useVoiceRecording(
         },
       });
 
+      // ✅ 关键修复：验证录音对象是否成功创建且正在录音
+      // 根据 expo-av 文档，createAsync 创建的录音对象应该立即开始录音
+      try {
+        const status = await recording.getStatusAsync();
+        if (!status.isLoaded || !status.isRecording) {
+          console.error("❌ 录音对象创建但未开始录音，状态:", status);
+          await cleanupRecordingObject(recording);
+          throw new Error("录音对象创建失败：状态异常");
+        }
+        console.log("✅ 录音成功启动，状态正常");
+      } catch (verifyError) {
+        // 如果验证失败，清理录音对象并重新抛出错误
+        console.error("❌ 验证录音状态失败:", verifyError);
+        await cleanupRecordingObject(recording);
+        throw verifyError;
+      }
+
       recordingRef.current = recording;
       globalRecordingRef = recording;
       setIsRecording(true);
@@ -273,7 +272,48 @@ export function useVoiceRecording(
 
       startDurationTimer();
     } catch (error) {
-      console.error("Failed to start recording:", error);
+      console.error("❌ Failed to start recording:", error);
+      
+      // ✅ 关键修复：错误发生时，彻底清理所有状态
+      // 这可以防止后续录音尝试时状态不一致导致卡住
+      
+      // 1. 清理录音对象引用（如果存在）
+      // 注意：如果 createAsync 失败，recordingRef.current 应该是 null
+      // 但如果验证失败，recordingRef.current 可能还未设置，所以这里只清理已存在的引用
+      if (recordingRef.current) {
+        await cleanupRecordingObject(recordingRef.current);
+        recordingRef.current = null;
+      }
+      
+      // 2. 清理全局录音对象引用（如果存在且与当前引用不同）
+      if (globalRecordingRef && globalRecordingRef !== recordingRef.current) {
+        await cleanupRecordingObject(globalRecordingRef);
+        globalRecordingRef = null;
+      }
+      
+      // 3. 清理定时器
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      
+      // 4. 重置所有状态
+      setIsRecording(false);
+      setIsPaused(false);
+      setDuration(0);
+      setNearLimit(false);
+      hasShownWarningRef.current = false;
+      
+      // 5. 清理 KeepAwake
+      try {
+        deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (e) {
+        // 忽略错误
+      }
+      
+      // 6. 显示错误提示
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("❌ 录音启动失败详情:", errorMessage);
       Alert.alert("错误", "启动录音失败，请重试");
     } finally {
       globalPreparing = false;

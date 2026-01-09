@@ -36,7 +36,7 @@ export const EmotionGlow: React.FC<EmotionGlowProps> = ({ emotion }) => {
               gradientUnits="userSpaceOnUse"
             >
               {/* 🎨 增强光影效果: 提高中心透明度从0.5到0.7,让光影更明显 */}
-              <Stop offset="0" stopColor={baseColor} stopOpacity="0.5" />
+              <Stop offset="0" stopColor={baseColor} stopOpacity="0.6" />
               <Stop offset="1" stopColor={baseColor} stopOpacity="0" />
             </RadialGradient>
           </Defs>
