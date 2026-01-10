@@ -8,7 +8,7 @@
  */
 
 import { Alert } from "react-native";
-import { signOut } from "../services/authService";
+import { signOut, getCurrentUser } from "../services/authService";
 
 /**
  * 错误类型枚举
@@ -141,6 +141,18 @@ async function handleAuthExpired(config: ErrorHandlerConfig) {
   console.log("🔒 处理认证过期...");
 
   try {
+    // ✅ 检查是否已经在 signOut 流程中（tokens 已被清除）
+    // 如果用户信息已经为空，说明用户正在 signOut，只需要调用回调进行导航，不需要再次清除
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      console.log("🔒 用户信息已清除，可能在 signOut 流程中，只执行导航回调");
+      // 如果配置了回调，调用它（用于导航）
+      if (config.onAuthExpired) {
+        config.onAuthExpired();
+      }
+      return;
+    }
+
     // 清除本地认证信息
     await signOut();
 

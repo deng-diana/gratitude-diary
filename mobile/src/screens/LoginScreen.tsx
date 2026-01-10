@@ -84,6 +84,25 @@ export default function LoginScreen() {
   // 获取 Typography 样式
   const typography = getTypography();
 
+  // ✅ 修复：页面挂载或获得焦点时，确保清除任何残留的用户状态
+  // 这样可以防止自动登录到之前的账号
+  React.useEffect(() => {
+    const checkAndClearStaleAuth = async () => {
+      try {
+        const currentUser = await getCurrentUser();
+        if (currentUser) {
+          console.log("🔒 LoginScreen: 检测到残留的用户状态，已清除");
+          // 如果发现有用户状态，说明可能是退出登录不彻底，再次清除
+          const { signOut } = await import("../services/authService");
+          await signOut();
+        }
+      } catch (error) {
+        console.error("❌ 检查用户状态失败:", error);
+      }
+    };
+    checkAndClearStaleAuth();
+  }, []);
+
   const markOnboardingComplete = async () => {
     try {
       await SecureStore.setItemAsync("hasCompletedOnboarding", "true");
@@ -113,10 +132,8 @@ export default function LoginScreen() {
       }
 
     await markOnboardingComplete();
-      // ✅ 跳转到日记列表
-      navigation.replace("DiaryList");
-
-      // TODO: 跳转到日记列表页面
+      // ✅ 跳转到主应用（MainDrawer，默认显示日记列表）
+      navigation.replace("MainDrawer");
     } catch (error: any) {
       console.error("Apple登录错误:", error);
 
@@ -185,9 +202,8 @@ export default function LoginScreen() {
       }
 
     await markOnboardingComplete();
-      // ✅ 跳转到日记列表
-      navigation.replace("DiaryList");
-      // TODO: 跳转到日记列表页面
+      // ✅ 跳转到主应用（MainDrawer，默认显示日记列表）
+      navigation.replace("MainDrawer");
     } catch (error: any) {
       console.error("Google登录错误:", error);
 
@@ -276,7 +292,8 @@ export default function LoginScreen() {
         setPendingEmail("");
         setPendingPassword("");
         setEmailForVerification("");
-        navigation.replace("DiaryList");
+        // ✅ 跳转到主应用（MainDrawer，默认显示日记列表）
+        navigation.replace("MainDrawer");
         return;
       }
 
@@ -363,7 +380,8 @@ export default function LoginScreen() {
       setPendingEmail("");
       setPendingPassword("");
       setEmailForVerification("");
-      navigation.replace("DiaryList");
+      // ✅ 跳转到主应用（MainDrawer，默认显示日记列表）
+      navigation.replace("MainDrawer");
     } catch (error: any) {
       console.error("❌ 邮箱确认失败:", error);
       const message = (error.message || "").toLowerCase();
@@ -414,7 +432,8 @@ export default function LoginScreen() {
       setEmailForVerification("");
 
       await markOnboardingComplete();
-      navigation.replace("DiaryList");
+      // ✅ 跳转到主应用（MainDrawer，默认显示日记列表）
+      navigation.replace("MainDrawer");
     } catch (error: any) {
       console.error("❌ 处理姓名确认失败:", error);
       let errorMessage = error.message || "操作失败";

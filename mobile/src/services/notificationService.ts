@@ -60,7 +60,8 @@ const buildReminderBody = async (): Promise<string> => {
   return pickRandom(messages).replace("{name}", safeName);
 };
 
-const ensureNotificationChannel = async () => {
+// ✅ 导出函数，允许在 App.tsx 启动时调用
+export const ensureNotificationChannel = async () => {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("daily-reminder", {
     name: "Daily Reminder",
@@ -118,7 +119,8 @@ const hasGrantedPermission = (
 ) => {
   if (permissions.granted) return true;
   const status = permissions.status;
-  if (status === PermissionStatus.GRANTED || status === "granted") {
+  // ✅ 处理不同 Expo SDK 版本的兼容性（使用 type assertion 避免 TS 警告）
+  if (status === PermissionStatus.GRANTED || (status as any) === "granted") {
     return true;
   }
   if (typeof status === "number" && status === 2) {
@@ -179,16 +181,17 @@ export const scheduleDailyReminder = async (
 ) => {
   await ensureNotificationChannel();
 
-  const content = {
+  const content: Notifications.NotificationContentInput = {
     title: "thankly",
     body: await buildReminderBody(),
-    channelId: "daily-reminder",
     data: {
       screen: "DiaryList",
     },
   };
 
-  const trigger: Notifications.DailyTriggerInput = {
+  // ✅ 使用 CalendarTriggerInput 而不是 DailyTriggerInput
+  const trigger: Notifications.CalendarTriggerInput = {
+    type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
     hour: settings.hour,
     minute: settings.minute,
     repeats: true,
@@ -199,22 +202,48 @@ export const scheduleDailyReminder = async (
     await Notifications.cancelScheduledNotificationAsync(existingId);
   }
 
+  console.log(`📅 调度每日提醒: ${settings.hour}:${String(settings.minute).padStart(2, '0')}`);
   const id = await Notifications.scheduleNotificationAsync({
     content,
     trigger,
   });
 
   await saveScheduledNotificationId(id);
+  console.log(`✅ 每日提醒已调度，通知ID: ${id}`);
 };
 
 export const applyReminderSettings = async (
   settings: DailyReminderSettings
 ) => {
+  console.log(`🔔 应用提醒设置: enabled=${settings.enabled}, time=${settings.hour}:${String(settings.minute).padStart(2, '0')}`);
+  
+  // ✅ 专业方案：在启用通知前验证权限状态
+  if (settings.enabled) {
+    const hasPermission = await hasNotificationPermission();
+    if (!hasPermission) {
+      // ✅ 如果没有权限但尝试启用，自动禁用并保存
+      console.warn("⚠️ 尝试启用通知但权限未授予，自动禁用");
+      await saveReminderSettings({ ...settings, enabled: false });
+      // ✅ 抛出错误，让调用者知道设置失败（用于 UI 状态同步）
+      throw new Error("NOTIFICATION_PERMISSION_DENIED");
+    }
+  }
+  
   await saveReminderSettings(settings);
   if (settings.enabled) {
-    await scheduleDailyReminder(settings);
+    try {
+      await scheduleDailyReminder(settings);
+      console.log("✅ 提醒设置应用成功");
+    } catch (error) {
+      // ✅ 专业错误处理：如果调度失败，自动禁用设置
+      console.error("❌ 调度通知失败，自动禁用:", error);
+      await saveReminderSettings({ ...settings, enabled: false });
+      // ✅ 重新抛出错误，让调用者知道失败
+      throw error;
+    }
   } else {
     await cancelDailyReminder();
+    console.log("✅ 提醒已取消");
   }
 };
 
@@ -243,7 +272,8 @@ export const sendTestNotification = async () => {
   await ensureNotificationChannel();
   const granted = await requestNotificationPermission();
   if (!granted) {
-    throw new Error("permission_denied");
+    // ✅ 统一错误消息，与其他地方保持一致
+    throw new Error("NOTIFICATION_PERMISSION_DENIED");
   }
 
   const body = await buildReminderBody();
@@ -252,12 +282,15 @@ export const sendTestNotification = async () => {
       content: {
         title: "thankly",
         body,
-        channelId: "daily-reminder",
         data: {
           screen: "DiaryList",
         },
       },
-      trigger: { seconds: 1, channelId: "daily-reminder" },
+      // ✅ 使用 TimeIntervalTriggerInput
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 1,
+      },
     });
   } catch (error) {
     console.error("Test notification failed:", error);

@@ -7,8 +7,9 @@
     "icon": "./assets/app-icon.png",
     "userInterfaceStyle": "light",
     "updates": {
-      "checkAutomatically": "ON_ERROR_RECOVERY",
-      "fallbackToCacheTimeout": 0
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/2b3c207c-899e-45be-8e1f-ee728ea89faa"
     },
     "splash": {
       "image": "./assets/splash-logo.png",
@@ -25,7 +26,10 @@
         "NSPhotoLibraryUsageDescription": "We need photo library access to select photos for your diary entries.",
         "NSFaceIDUsageDescription": "Use Face ID to sign in quickly.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio", "remote-notification"]
+        "UIBackgroundModes": [
+          "audio",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -71,6 +75,14 @@
           "icon": "./assets/notification-icon.png",
           "color": "#E56C45",
           "sounds": []
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "thankly-mobile",
+          "organization": "diana-deng"
         }
       ]
     ],

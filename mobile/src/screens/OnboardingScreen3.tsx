@@ -39,15 +39,28 @@ export default function OnboardingScreen3() {
         {
           text: t("reminder.onboardingAllow"),
           onPress: async () => {
+            // ✅ 专业方案：清晰的权限请求流程
+            // Step 1: 标记已提示（防止 maybeAutoEnableReminderOnLaunch 再次请求）
             await markReminderAutoPrompted();
+            
+            // Step 2: 请求权限
             const granted = await requestNotificationPermission();
-            if (granted) {
+            
+            // Step 3: 根据权限结果保存设置
+            // ✅ 使用 try-catch 确保即使设置失败也不阻断用户流程
+            try {
               await applyReminderSettings({
-                enabled: true,
+                enabled: granted, // ✅ 只在权限授予时启用
                 hour: 20,
                 minute: 0,
               });
+            } catch (error) {
+              // ✅ 记录错误但不阻断流程
+              console.warn("Failed to apply reminder settings during onboarding:", error);
             }
+            
+            // Step 4: 完成onboarding并导航
+            // ✅ 无论提醒设置是否成功，都继续导航（不阻断用户）
             await SecureStore.setItemAsync("hasCompletedOnboarding", "true");
             navigation.navigate("Login");
           },

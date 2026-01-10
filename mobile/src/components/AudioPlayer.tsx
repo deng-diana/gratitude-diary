@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    height: 46, // ✅ 固定高度从 40 修正为 46, 确保不跳动
+    height: 42, // ✅ 固定高度从 46 缩减 4px 到 42
   },
   playButton: {
     marginRight: 12,
@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   progressBar: {
-    height: 44, // ✅ 垂直热区保持 44px
+    height: 42, // ✅ 垂直热区同步缩减到 42px
     justifyContent: "center",
     position: "relative",
     width: "100%",
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     backgroundColor: "#E56C45",
-    top: 14, // (44-16)/2 = 14
+    top: 13, // (42-16)/2 = 13
     marginLeft: -8,
   },
 });

@@ -42,8 +42,10 @@ import { useSingleAudioPlayer } from "../hooks/useSingleAudioPlayer";
 import { getDiaryDetail } from "../services/diaryService";
 import { updateDiary } from "../services/diaryService"; // ✅ 添加
 import AudioPlayer from "../components/AudioPlayer";
+import ImagePreviewModal from "../components/ImagePreviewModal";
 import { EmotionCapsule } from "../components/EmotionCapsule"; // ✅ 导入情绪胶囊组件
 import { EmotionGlow } from "../components/EmotionGlow"; // ✅ 导入情绪光晕组件
+import { DiaryContentCard } from "../components/DiaryContentCard"; // ✅ 导入通用的日记卡片组件
 import { AIFeedbackCard } from "../components/AIFeedbackCard"; // ✅ 导入 AI 暖心回复组件
 import { EmotionType, EMOTION_MAP, DEFAULT_EMOTION } from "../types/emotion"; // ✅ 导入情绪配置用于动态颜色
 
@@ -75,6 +77,10 @@ interface Diary {
   emotion_data?: { emotion: string; [key: string]: any }; // ✅ 情感数据
 }
 
+
+const { width: windowWidth, height: windowHeight } = Dimensions.get("window");
+const MAX_IMAGE_HEIGHT = windowHeight * 0.6;
+
 interface DiaryDetailScreenProps {
   diaryId: string;
   onClose: () => void;
@@ -92,6 +98,11 @@ export default function DiaryDetailScreen({
   // ========== 状态管理 ==========
   const [diary, setDiary] = useState<Diary | null>(null);
   const [loading, setLoading] = useState(true);
+  // ✅ Image viewer states (DRY from DiaryListScreen)
+  const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
+  const [imagePreviewIndex, setImagePreviewIndex] = useState(0);
+
   const [error, setError] = useState<string | null>(null);
 
   // ✅ 新增:编辑相关状态
@@ -102,6 +113,11 @@ export default function DiaryDetailScreen({
 
   // ✅ 新增:保存状态保护
   const isSavingRef = useRef(false);
+
+  // ✅ Image deletion state
+  const [selectedImageForDeletion, setSelectedImageForDeletion] = useState<number | null>(null);
+  const [isDeletingImage, setIsDeletingImage] = useState(false);
+  const [showDeleteButtons, setShowDeleteButtons] = useState(false);
 
   // ✅ 新增:Toast状态
   const [toastVisible, setToastVisible] = useState(false);
@@ -135,6 +151,45 @@ export default function DiaryDetailScreen({
     } finally {
       setLoading(false);
     }
+  };
+
+  // ========== 图片相关函数 ==========
+  const handleDeleteImage = async (index: number) => {
+    if (!diary || !diary.image_urls) return;
+
+    Alert.alert(
+      t("detail.deleteImageTitle"), // ✅ 使用更专业的标题
+      t("detail.deleteImageConfirm"), // ✅ 使用更简洁友好的文案
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.delete"),
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsDeletingImage(true);
+              const newImageUrls = diary.image_urls!.filter((_, i) => i !== index);
+              const updatedDiary = await updateDiary(
+                diary.diary_id,
+                undefined,
+                undefined,
+                newImageUrls
+              );
+              setDiary(updatedDiary);
+              if (onUpdate) onUpdate();
+              
+              // ✅ 删除成功后显示Toast,而不是Alert
+              showToast(t("detail.imageDeleted"));
+            } catch (error) {
+              // ✅ 只在失败时才显示Alert
+              Alert.alert(t("common.error"), t("error.deleteFailed"));
+            } finally {
+              setIsDeletingImage(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ========== 编辑相关函数 ==========
@@ -231,7 +286,7 @@ export default function DiaryDetailScreen({
       }
 
       // ✅ 关闭Modal
-      closeSheet();
+      onClose();
     } catch (error: any) {
       console.error("❌ 保存失败:", error);
       Alert.alert(
@@ -316,7 +371,7 @@ export default function DiaryDetailScreen({
           </View>
 
           <TouchableOpacity 
-            onPress={closeSheet} 
+            onPress={onClose} 
             style={styles.closeButton}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
@@ -396,7 +451,7 @@ export default function DiaryDetailScreen({
             </View>
 
             <TouchableOpacity 
-              onPress={closeSheet} 
+              onPress={onClose} 
               style={styles.closeButton}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
@@ -486,7 +541,6 @@ export default function DiaryDetailScreen({
     width: number;
     height: number;
   } | null>(null);
-  const thumbnailRefs = useRef<{ [key: number]: View | null }>({});
 
   const renderDiaryDetail = () => {
     if (!diary) return null;
@@ -494,11 +548,6 @@ export default function DiaryDetailScreen({
     // 如果是纯图片日记，只显示图片轮播
     if (isImageOnlyDiary()) {
       const imageUrls = diary.image_urls || [];
-
-      // 调试：检查图片数据
-      if (imageUrls.length === 0) {
-        console.warn("⚠️ 纯图片日记但没有图片URLs");
-      }
 
       return (
         <View style={styles.imageOnlyContainer}>
@@ -511,54 +560,36 @@ export default function DiaryDetailScreen({
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item, index) => `${item}-${index}`}
-            renderItem={({ item }) => {
-              console.log("🖼️ 渲染图片:", item);
-              return (
-                <View
-                  style={[
-                    styles.imageSlide,
-                    {
-                      maxHeight: MAX_IMAGE_HEIGHT,
-                      height: MAX_IMAGE_HEIGHT, // 明确设置容器高度
-                    },
-                  ]}
-                >
-                  <Image
-                    source={{ uri: item }}
-                    style={{
-                      width: windowWidth,
-                      height: MAX_IMAGE_HEIGHT,
-                      maxWidth: windowWidth,
-                      maxHeight: MAX_IMAGE_HEIGHT,
-                    }}
-                    resizeMode="contain"
-                    onLoad={() => {
-                      console.log("✅ 图片加载成功:", item);
-                    }}
-                    onError={(error) => {
-                      console.error(
-                        "❌ 图片加载失败:",
-                        item,
-                        error.nativeEvent.error
-                      );
-                    }}
-                  />
-                </View>
-              );
-            }}
+            renderItem={({ item }) => (
+              <View
+                style={[
+                  styles.imageSlide,
+                  {
+                    maxHeight: MAX_IMAGE_HEIGHT,
+                    height: MAX_IMAGE_HEIGHT,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: item }}
+                  style={{
+                    width: windowWidth,
+                    height: MAX_IMAGE_HEIGHT,
+                    maxWidth: windowWidth,
+                    maxHeight: MAX_IMAGE_HEIGHT,
+                  }}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
             style={[
               styles.imageList,
               {
-                paddingTop: Platform.OS === "ios" ? 52 : 40, // header 实际高度：44 + 8 = 52px
+                paddingTop: Platform.OS === "ios" ? 52 : 40,
                 paddingBottom: Platform.OS === "ios" ? 50 : 30,
               },
             ]}
             contentContainerStyle={{ flexGrow: 1 }}
-            getItemLayout={(data, index) => ({
-              length: Dimensions.get("window").width,
-              offset: Dimensions.get("window").width * index,
-              index,
-            })}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(
                 event.nativeEvent.contentOffset.x /
@@ -570,7 +601,7 @@ export default function DiaryDetailScreen({
 
           {/* 底部点状指示器 */}
           {imageUrls.length > 1 && (
-            <View style={styles.imageIndicatorContainer}>
+            <View style={styles.imageIndicator}>
               {imageUrls.map((_, index) => (
                 <View
                   key={index}
@@ -587,96 +618,56 @@ export default function DiaryDetailScreen({
       );
     }
 
-    // ✅ 动态计算字体
-    const isChineseTitle = detectTextLanguage(diary.title || "") === "zh";
-    const isChineseContent =
-      detectTextLanguage(diary.polished_content || "") === "zh";
-
-    // ✅ 计算动态颜色 (描边与填充)
-    const emotionType = diary.emotion_data?.emotion as EmotionType;
-    const emotionConfig = emotionType && EMOTION_MAP[emotionType] ? EMOTION_MAP[emotionType] : DEFAULT_EMOTION;
-    const dynamicBorderColor = emotionConfig.color;
-    const dynamicBackgroundColor = `${dynamicBorderColor}4D`; // ✅ 30% 透明度 (Hex '4D' ≈ 30%)
-
     // 普通日记：显示文字内容
     return (
       <>
-        {/* ✅ 图片缩略图（如果有图片）- 动态列数 + 横向滚动 */}
+        {/* ✅ 图片缩略图 - 采用 Photo Entry 风格 (4列, 8px gap) */}
         {diary.image_urls && diary.image_urls.length > 0 && (
-          <View style={styles.imageThumbnailContainer}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.imageThumbnailScrollContent}
-            >
-              {(() => {
-                // ✅ 动态计算列数：<=3张用3列，>3张用4列
-                const numColumns = diary.image_urls.length > 3 ? 4 : 3;
-                const gap = 8;
-                const padding = 40; // container padding (20*2)
-                const screenWidth = Dimensions.get("window").width;
-                const availableWidth = screenWidth - padding;
-
-                // 计算图片尺寸
-                const imageSize =
-                  (availableWidth - (numColumns - 1) * gap) / numColumns;
-
-                return diary.image_urls.map((url, index) => (
+          <View style={styles.imageGridContainer}>
+            <View style={styles.imageGrid}>
+              {diary.image_urls.map((url, index) => {
+                const isLastInRow = (index + 1) % 4 === 0;
+                return (
                   <TouchableOpacity
                     key={`${url}-${index}`}
                     style={[
-                      styles.imageThumbnailWrapper,
-                      {
-                        width: imageSize,
-                        height: imageSize,
-                        marginRight:
-                          index === diary.image_urls!.length - 1 ? 0 : gap,
-                      },
+                      styles.imageWrapper,
+                      isLastInRow && styles.imageWrapperLastInRow,
                     ]}
                     onPress={() => {
-                      const thumbnailRef = thumbnailRefs.current[index];
-                      if (thumbnailRef) {
-                        thumbnailRef.measure(
-                          (x, y, width, height, pageX, pageY) => {
-                            setThumbnailLayout({
-                              x: pageX,
-                              y: pageY,
-                              width,
-                              height,
-                            });
-                            setFullScreenImageIndex(index);
-                            setFullScreenImageVisible(true);
-                          }
-                        );
-                      } else {
-                        setThumbnailLayout(null);
-                        setFullScreenImageIndex(index);
-                        setFullScreenImageVisible(true);
+                      if (showDeleteButtons) {
+                        setShowDeleteButtons(false);
+                        return;
                       }
+                      setImagePreviewUrls(diary.image_urls!);
+                      setImagePreviewIndex(index);
+                      setImagePreviewVisible(true);
                     }}
+                    onLongPress={() => setShowDeleteButtons(true)}
                     activeOpacity={0.8}
                   >
-                    <View
-                      ref={(ref) => {
-                        thumbnailRefs.current[index] = ref;
-                      }}
-                      collapsable={false}
-                    >
-                      <Image
-                        source={{ uri: url }}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          borderRadius: 8,
-                          backgroundColor: "#f0f0f0",
-                        }}
-                        resizeMode="cover"
-                      />
-                    </View>
+                    <Image
+                      source={{ uri: url }}
+                      style={[
+                        styles.thumbnail,
+                        { opacity: showDeleteButtons ? 0.7 : 1 }
+                      ]}
+                      resizeMode="cover"
+                    />
+                    
+                    {showDeleteButtons && (
+                      <TouchableOpacity
+                        style={styles.deleteButtonMask}
+                        onPress={() => handleDeleteImage(index)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons name="close" size={16} color="#fff" />
+                      </TouchableOpacity>
+                    )}
                   </TouchableOpacity>
-                ));
-              })()}
-            </ScrollView>
+                );
+              })}
+            </View>
           </View>
         )}
 
@@ -695,130 +686,25 @@ export default function DiaryDetailScreen({
           />
         )}
 
-        {/* 日记内容卡片 - 可编辑 */}
-        <View style={[
-          styles.diaryCard, 
-          { 
-            borderColor: dynamicBorderColor,
-            backgroundColor: dynamicBackgroundColor // ✅ 添加动态背景填充
-          }
-        ]}>
+        {/* 日记主体卡片 - 可编辑 */}
+        <DiaryContentCard
+          title={diary.title}
+          content={diary.polished_content}
+          emotion={diary.emotion_data?.emotion}
+          language={diary.language}
+          
+          isEditingTitle={isEditingTitle}
+          isEditingContent={isEditingContent}
+          editedTitle={editedTitle}
+          editedContent={editedContent}
+          
+          onStartTitleEditing={startEditingTitle}
+          onStartContentEditing={startEditingContent}
+          onTitleChange={setEditedTitle}
+          onContentChange={setEditedContent}
 
-          {/* 标题 */}
-          {isEditingTitle ? (
-            <TextInput
-              style={[
-                styles.editTitleInput,
-                {
-                  fontFamily: getFontFamilyForText(
-                    editedTitle || diary.title || "",
-                    "bold"
-                  ),
-                },
-              ]}
-              value={editedTitle}
-              onChangeText={setEditedTitle}
-              autoFocus
-              multiline
-              placeholder="输入标题..."
-              scrollEnabled={false}
-              accessibilityLabel={t("diary.placeholderTitle")}
-              accessibilityHint={t("accessibility.input.textHint")}
-              accessibilityRole="text"
-            />
-          ) : (
-            <TouchableOpacity
-              onPress={startEditingTitle}
-              activeOpacity={0.7}
-              accessibilityLabel={diary.title}
-              accessibilityHint={t("accessibility.button.editHint")}
-              accessibilityRole="button"
-            >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, gap: 8 }}>
-                <Text
-                  style={[
-                    styles.titleText,
-                    {
-                      fontFamily: getFontFamilyForText(
-                        diary.title,
-                        isChineseTitle ? "bold" : "semibold"
-                      ),
-                      fontWeight: isChineseTitle ? "700" : "600",
-                      fontSize: isChineseTitle ? 16 : 18,
-                      lineHeight: isChineseTitle ? 26 : 24,
-                      flex: 1, // ✅ 让标题占据剩余空间，避免挤压标签
-                    },
-                  ]}
-                >
-                  {diary.title}
-                </Text>
-
-                {/* ✅ 显示情绪标签 - 只要不是纯图片日记就强制显示（使用默认情绪） */}
-                {(diary.emotion_data?.emotion || !isImageOnlyDiary()) && (
-                  <View style={{ marginTop: 2 }}>
-                    <EmotionCapsule 
-                      emotion={diary.emotion_data?.emotion}
-                      language={diary.language || "en"}
-                      content={diary.polished_content || diary.original_content}
-                    />
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
-          )}
-
-          {/* 内容 */}
-          {isEditingContent ? (
-            <TextInput
-              style={[
-                styles.editContentInput,
-                {
-                  fontFamily: getFontFamilyForText(
-                    editedContent || diary.polished_content || "",
-                    "regular"
-                  ),
-                },
-              ]}
-              value={editedContent}
-              onChangeText={setEditedContent}
-              autoFocus
-              multiline
-              placeholder="输入内容..."
-              scrollEnabled={true}
-              textAlignVertical="top"
-              accessibilityLabel={t("diary.placeholderContent")}
-              accessibilityHint={t("accessibility.input.textHint")}
-              accessibilityRole="text"
-            />
-          ) : (
-            <TouchableOpacity
-              onPress={startEditingContent}
-              activeOpacity={0.7}
-              accessibilityLabel={
-                diary.polished_content.substring(0, 100) +
-                (diary.polished_content.length > 100 ? "..." : "")
-              }
-              accessibilityHint={t("accessibility.button.editHint")}
-              accessibilityRole="button"
-            >
-              <Text
-                style={[
-                  styles.contentText,
-                  {
-                    fontFamily: getFontFamilyForText(
-                      diary.polished_content,
-                      "regular"
-                    ),
-                    fontSize: isChineseContent ? 16 : 16, // ✅ 中文字号从 14 增加到 16
-                    lineHeight: isChineseContent ? 32 : 28, // ✅ 增加 4px 行高
-                  },
-                ]}
-              >
-                {diary.polished_content}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+          style={styles.diaryCardOverride}
+        />
 
         {/* AI反馈 - 编辑时隐藏 */}
         {!isEditingTitle && !isEditingContent && !!diary.ai_feedback && (
@@ -831,814 +717,47 @@ export default function DiaryDetailScreen({
     );
   };
 
-  // ====== 底部上弹动画 ======
-  const slideY = useRef(new Animated.Value(300)).current;
-  const [visible, setVisible] = useState(false);
-  const windowHeight = Dimensions.get("window").height;
-  const windowWidth = Dimensions.get("window").width;
-  const MAX_SHEET_RATIO = 0.85;
-  const maxSheetHeight = Math.round(windowHeight * MAX_SHEET_RATIO);
-  const MIN_SHEET_HEIGHT = 160;
-  const [contentHeight, setContentHeight] = useState(0);
-
-  // 图片显示区域最大高度（屏幕高度的 70%）
-  const MAX_IMAGE_HEIGHT = Math.round(windowHeight * 0.7);
-
-  // ✅ 动态高度:编辑时用最大高度,预览时自适应,纯图片日记全屏
-  const isEditing = isEditingTitle || isEditingContent;
-  const isImageOnly = isImageOnlyDiary();
-  const sheetHeight = isImageOnly
-    ? windowHeight // 纯图片日记:全屏显示
-    : isEditing
-    ? maxSheetHeight // 编辑模式:使用最大高度
-    : Math.max(Math.min(contentHeight, maxSheetHeight), MIN_SHEET_HEIGHT); // 预览模式:自适应
-
-  useEffect(() => {
-    setVisible(true);
-    Animated.timing(slideY, {
-      toValue: 0,
-      duration: 300,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  const closeSheet = () => {
-    Animated.timing(slideY, {
-      toValue: 300,
-      duration: 250,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
-    }).start(() => onClose());
-  };
-
-  // ========== 主渲染 ==========
   return (
-    <View style={styles.container}>
-      {/* 黑色遮罩：静态全屏，点击关闭 */}
-      <Pressable
-        style={styles.overlay}
-        onPress={closeSheet}
-        // 确保可以点击（纯图片日记时 modal 全屏，但 overlay 仍然在下方）
-      />
-
-      {/* 底部卡片：与ActionSheet一致，仅底部上弹 */}
-      <Animated.View
-        style={[
-          styles.modal,
-          {
-            transform: [{ translateY: slideY }],
-            height: sheetHeight,
-            maxHeight: maxSheetHeight,
-            backgroundColor: isImageOnly ? "transparent" : "#FFFFFF",
-            borderTopLeftRadius: isImageOnly ? 0 : 20,
-            borderTopRightRadius: isImageOnly ? 0 : 20,
-          },
-        ]}
-        pointerEvents={isImageOnly ? "box-none" : "auto"}
-      >
-        <SafeAreaView
-          style={styles.safeArea}
-          edges={isImageOnly ? [] : ["bottom"]}
-        >
-          {loading ? (
-            renderLoading()
-          ) : error ? (
-            renderError()
-          ) : (
-            <>
-              {/* 纯图片日记：直接显示图片轮播，不使用 ScrollView */}
-              {isImageOnlyDiary() ? (
-                renderDiaryDetail()
-              ) : (
-                <>
-                  {/* ✅ 添加Header */}
-                  {renderDetailHeader()}
-                  {/* 普通日记：使用 ScrollView */}
-                  <KeyboardAvoidingView
-                    style={{ flex: 1 }}
-                    behavior={Platform.OS === "ios" ? "padding" : "height"}
-                    keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 0}
-                  >
-                    <ScrollView
-                      style={styles.scrollView}
-                      contentContainerStyle={styles.scrollContent}
-                      showsVerticalScrollIndicator={false}
-                      onContentSizeChange={(_, h) => setContentHeight(h + 24)}
-                      bounces
-                      keyboardShouldPersistTaps="handled"
-                      keyboardDismissMode="interactive"
-                    >
-                      {renderDiaryDetail()}
-                    </ScrollView>
-                  </KeyboardAvoidingView>
-                </>
-              )}
-            </>
-          )}
+    <GestureHandlerRootView style={styles.container}>
+      {/* 背景遮罩 */}
+      <Pressable style={styles.overlay} onPress={onClose} />
+      
+      {/* 底部详情面板 */}
+      <View style={styles.modal}>
+        <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
+          {renderDetailHeader()}
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {loading ? renderLoading() : error ? renderError() : renderDiaryDetail()}
+          </ScrollView>
         </SafeAreaView>
-      </Animated.View>
+      </View>
 
-      {/* iOS 轻量 Toast 提示 - 使用全屏容器确保居中 */}
-      {Platform.OS === "ios" && toastVisible && (
-        <View style={styles.toastOverlay} pointerEvents="none">
+      {/* 图片预览 Modal */}
+      {diary && diary.image_urls && diary.image_urls.length > 0 && (
+        <ImagePreviewModal
+          visible={imagePreviewVisible}
+          images={diary.image_urls}
+          initialIndex={imagePreviewIndex}
+          onClose={() => setImagePreviewVisible(false)}
+        />
+      )}
+      
+      {/* Toast 提示 */}
+      {toastVisible && (
+        <View style={styles.toastOverlay}>
           <View style={styles.toastContainer}>
-            <Text
-              style={[
-                styles.toastText,
-                {
-                  fontFamily: getFontFamilyForText(toastMessage, "regular"),
-                },
-              ]}
-            >
-              {toastMessage}
-            </Text>
+            <Text style={styles.toastText}>{toastMessage}</Text>
           </View>
         </View>
       )}
-
-      {/* ✅ 全屏图片查看器 */}
-      {diary && diary.image_urls && diary.image_urls.length > 0 && (
-        <FullScreenImageViewer
-          visible={fullScreenImageVisible}
-          imageUrls={diary.image_urls}
-          initialIndex={fullScreenImageIndex}
-          thumbnailLayout={thumbnailLayout}
-          onClose={() => {
-            setFullScreenImageVisible(false);
-            // 延迟清除布局信息，确保关闭动画完成
-            setTimeout(() => setThumbnailLayout(null), 300);
-          }}
-          onIndexChange={setFullScreenImageIndex}
-        />
-      )}
-    </View>
-  );
-}
-
-// ========== 全屏图片查看器组件 ==========
-interface FullScreenImageViewerProps {
-  visible: boolean;
-  imageUrls: string[];
-  initialIndex: number;
-  thumbnailLayout: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null; // ✅ 新增：缩略图位置信息
-  onClose: () => void;
-  onIndexChange?: (index: number) => void;
-}
-
-const FullScreenImageViewer: React.FC<FullScreenImageViewerProps> = ({
-  visible,
-  imageUrls,
-  initialIndex,
-  thumbnailLayout,
-  onClose,
-  onIndexChange,
-}) => {
-  const [currentIndex, setCurrentIndex] = useState(initialIndex);
-  const flatListRef = useRef<FlatList>(null);
-  const windowWidth = Dimensions.get("window").width;
-  const windowHeight = Dimensions.get("window").height;
-  // ✅ 新增：存储每张图片的尺寸信息（用于等比显示）
-  const [imageDimensions, setImageDimensions] = useState<{
-    [key: number]: { width: number; height: number };
-  }>({});
-
-  // ✅ 动画值：用于平滑过渡
-  const scaleAnim = useRef(new Animated.Value(0)).current;
-  const translateXAnim = useRef(new Animated.Value(0)).current;
-  const translateYAnim = useRef(new Animated.Value(0)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  const backgroundOpacityAnim = useRef(new Animated.Value(0)).current;
-  const [isAnimating, setIsAnimating] = useState(false); // ✅ 跟踪动画状态
-
-  // ✅ 新增：手势缩放相关状态和动画值
-  const [zoomScale, setZoomScale] = useState<{ [key: number]: number }>({});
-  const [translateX, setTranslateX] = useState<{ [key: number]: number }>({});
-  const [translateY, setTranslateY] = useState<{ [key: number]: number }>({});
-  const scaleAnims = useRef<{ [key: number]: Animated.Value }>({});
-  const translateXAnims = useRef<{ [key: number]: Animated.Value }>({});
-  const translateYAnims = useRef<{ [key: number]: Animated.Value }>({});
-
-  // ✅ 计算动画的起始和结束值
-  const getAnimationValues = () => {
-    if (!thumbnailLayout) {
-      // 无缩略图信息：使用淡入淡出
-      return {
-        startScale: 0.8,
-        endScale: 1,
-        startX: 0,
-        endX: 0,
-        startY: 0,
-        endY: 0,
-      };
-    }
-
-    // 计算缩略图中心点（相对于屏幕）
-    const thumbnailCenterX = thumbnailLayout.x + thumbnailLayout.width / 2;
-    const thumbnailCenterY = thumbnailLayout.y + thumbnailLayout.height / 2;
-
-    // 计算屏幕中心点
-    const screenCenterX = windowWidth / 2;
-    const screenCenterY = windowHeight / 2;
-
-    // 计算需要移动的距离（从缩略图中心移动到屏幕中心）
-    const translateX = screenCenterX - thumbnailCenterX;
-    const translateY = screenCenterY - thumbnailCenterY;
-
-    // 计算缩放比例：从缩略图尺寸放大到全屏尺寸
-    // 使用较大的比例，确保图片能够填充屏幕（但保持 contain 模式）
-    const scaleX = windowWidth / thumbnailLayout.width;
-    const scaleY = windowHeight / thumbnailLayout.height;
-    // 使用较大的比例，让图片能够放大到全屏
-    const scale = Math.max(scaleX, scaleY) * 1.1; // 稍微放大一点，确保填充效果
-
-    return {
-      startScale: 1, // 从原始尺寸开始
-      endScale: scale, // 放大到全屏
-      startX: 0, // 从缩略图位置开始（translateX 会处理位置）
-      endX: translateX, // 移动到屏幕中心
-      startY: 0,
-      endY: translateY,
-    };
-  };
-
-  // ✅ 打开动画：从缩略图位置放大到全屏
-  useEffect(() => {
-    if (visible) {
-      setIsAnimating(true);
-      const { startScale, endScale, startX, endX, startY, endY } =
-        getAnimationValues();
-
-      // ✅ 关键修复：确保初始值正确设置
-      // 如果是从缩略图开始的动画，初始 scale 应该是缩略图相对于全屏的比例
-      if (thumbnailLayout) {
-        // 计算缩略图相对于全屏的初始缩放比例
-        const initialScale = Math.min(
-          thumbnailLayout.width / windowWidth,
-          thumbnailLayout.height / windowHeight
-        );
-        scaleAnim.setValue(initialScale);
-        // 初始位置：需要将图片从屏幕中心移动到缩略图位置
-        // 所以 translate 应该是负的移动距离
-        const thumbnailCenterX = thumbnailLayout.x + thumbnailLayout.width / 2;
-        const thumbnailCenterY = thumbnailLayout.y + thumbnailLayout.height / 2;
-        const screenCenterX = windowWidth / 2;
-        const screenCenterY = windowHeight / 2;
-        translateXAnim.setValue(screenCenterX - thumbnailCenterX);
-        translateYAnim.setValue(screenCenterY - thumbnailCenterY);
-      } else {
-        scaleAnim.setValue(startScale);
-        translateXAnim.setValue(startX);
-        translateYAnim.setValue(startY);
-      }
-      opacityAnim.setValue(0);
-      backgroundOpacityAnim.setValue(0);
-
-      // 执行动画（250ms，行业标准）
-      Animated.parallel([
-        Animated.timing(scaleAnim, {
-          toValue: endScale,
-          duration: 250,
-          easing: Easing.out(Easing.cubic), // 使用 cubic 缓动，更自然
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateXAnim, {
-          toValue: endX,
-          duration: 250,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateYAnim, {
-          toValue: endY,
-          duration: 250,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacityAnim, {
-          toValue: 1,
-          duration: 250,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(backgroundOpacityAnim, {
-          toValue: 1,
-          duration: 250,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        setIsAnimating(false);
-      });
-    }
-  }, [visible, thumbnailLayout]);
-
-  // ✅ 关闭动画：从全屏缩小回缩略图位置
-  const handleClose = () => {
-    setIsAnimating(true);
-    const { startScale, startX, startY } = getAnimationValues();
-
-    // ✅ 计算关闭时的目标值
-    let targetScale = startScale;
-    let targetX = startX;
-    let targetY = startY;
-
-    if (thumbnailLayout) {
-      // ✅ 计算缩略图相对于全屏的缩放比例
-      // 参考微信朋友圈逻辑：宽度固定，所以缩放比例 = 缩略图宽度 / 屏幕宽度
-      targetScale = thumbnailLayout.width / windowWidth;
-      // 计算需要移动回缩略图位置的距离
-      const thumbnailCenterX = thumbnailLayout.x + thumbnailLayout.width / 2;
-      const thumbnailCenterY = thumbnailLayout.y + thumbnailLayout.height / 2;
-      const screenCenterX = windowWidth / 2;
-      const screenCenterY = windowHeight / 2;
-      targetX = screenCenterX - thumbnailCenterX;
-      targetY = screenCenterY - thumbnailCenterY;
-    }
-
-    Animated.parallel([
-      Animated.timing(scaleAnim, {
-        toValue: targetScale,
-        duration: 250,
-        easing: Easing.in(Easing.cubic), // 关闭时使用 ease-in
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateXAnim, {
-        toValue: targetX,
-        duration: 250,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateYAnim, {
-        toValue: targetY,
-        duration: 250,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 0,
-        duration: 200, // 背景稍快一点
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: true,
-      }),
-      Animated.timing(backgroundOpacityAnim, {
-        toValue: 0,
-        duration: 200,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setIsAnimating(false);
-      onClose();
-    });
-  };
-
-  // 当 initialIndex 变化时，更新当前索引并滚动到对应位置
-  useEffect(() => {
-    if (visible && initialIndex !== currentIndex) {
-      setCurrentIndex(initialIndex);
-      flatListRef.current?.scrollToIndex({
-        index: initialIndex,
-        animated: false,
-      });
-    }
-  }, [visible, initialIndex]);
-
-  // 当索引变化时，通知父组件
-  useEffect(() => {
-    if (onIndexChange) {
-      onIndexChange(currentIndex);
-    }
-  }, [currentIndex, onIndexChange]);
-
-  const handleScroll = (event: any) => {
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const index = Math.round(offsetX / windowWidth);
-    if (index !== currentIndex && index >= 0 && index < imageUrls.length) {
-      setCurrentIndex(index);
-    }
-  };
-
-  // ✅ 计算当前图片的动画样式
-  const getImageAnimatedStyle = () => {
-    if (!thumbnailLayout) {
-      // 无缩略图信息：使用淡入淡出
-      return {
-        opacity: opacityAnim,
-        transform: [
-          {
-            scale: scaleAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.8, 1],
-            }),
-          },
-        ],
-      };
-    }
-
-    // 有缩略图信息：使用位置和缩放动画
-    // 关键：transform 的顺序很重要！先 translate 再 scale
-    return {
-      opacity: opacityAnim,
-      transform: [
-        { translateX: translateXAnim },
-        { translateY: translateYAnim },
-        { scale: scaleAnim },
-      ],
-    };
-  };
-
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <Modal
-        visible={visible}
-        transparent
-        animationType="none" // ✅ 禁用默认动画，使用自定义动画
-        onRequestClose={handleClose}
-        statusBarTranslucent
-      >
-        <StatusBar hidden />
-        <View style={fullScreenStyles.container}>
-          {/* 黑色背景 - 带透明度动画 */}
-          <Animated.View
-            style={[
-              fullScreenStyles.background,
-              { opacity: backgroundOpacityAnim },
-            ]}
-          />
-
-          {/* 顶部关闭按钮 - 更细的outline风格，更大的间距 */}
-          <Animated.View
-            style={[fullScreenStyles.headerWrapper, { opacity: opacityAnim }]}
-          >
-            <SafeAreaView style={fullScreenStyles.header} edges={["top"]}>
-              <TouchableOpacity
-                style={fullScreenStyles.closeButton}
-                onPress={handleClose}
-                activeOpacity={0.7}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel={t("common.close")}
-                accessibilityHint={t("accessibility.button.closeHint")}
-                accessibilityRole="button"
-              >
-                <Ionicons name="close-outline" size={24} color="#fff" />
-              </TouchableOpacity>
-            </SafeAreaView>
-          </Animated.View>
-
-          {/* 图片轮播 - 支持点击图片关闭（模仿微信） */}
-          <FlatList
-            ref={flatListRef}
-            data={imageUrls}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(item, index) => `${item}-${index}`}
-            initialScrollIndex={initialIndex}
-            getItemLayout={(data, index) => ({
-              length: windowWidth,
-              offset: windowWidth * index,
-              index,
-            })}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            scrollEnabled={!isAnimating} // ✅ 动画期间禁用滚动
-            renderItem={({ item, index }) => {
-              // ✅ 只有当前索引的图片才显示动画
-              const isCurrentImage = index === currentIndex;
-              const animatedStyle =
-                isCurrentImage && thumbnailLayout
-                  ? getImageAnimatedStyle()
-                  : { opacity: opacityAnim };
-
-              // ✅ 提取 opacity，用于图片淡入淡出效果
-              const imageOpacity = animatedStyle?.opacity || opacityAnim;
-
-              // ✅ 初始化手势动画值
-              if (!scaleAnims.current[index]) {
-                scaleAnims.current[index] = new Animated.Value(1);
-                translateXAnims.current[index] = new Animated.Value(0);
-                translateYAnims.current[index] = new Animated.Value(0);
-              }
-
-              // ✅ 计算图片尺寸（等比例，宽度固定为屏幕宽度，高度根据比例计算，不限制最大高度）
-              // 参考微信实现：图片按原比例显示，宽度最大为屏幕宽度，高度按比例计算
-              const dimensions = imageDimensions[index];
-              let imageWidth = windowWidth;
-              let imageHeight = windowWidth; // ✅ 默认使用正方形（1:1），避免拉伸
-              if (dimensions && dimensions.width && dimensions.height) {
-                const aspectRatio = dimensions.height / dimensions.width;
-                // ✅ 宽度固定为屏幕宽度，高度按比例计算，不限制最大高度
-                // 如果高度超过屏幕，允许在容器内滚动查看
-                imageHeight = windowWidth * aspectRatio;
-              }
-
-              // ✅ 创建手势
-              const pinchGesture = Gesture.Pinch()
-                .onUpdate((event) => {
-                  const newScale = Math.max(1, Math.min(event.scale, 5)); // 限制缩放范围 1-5倍
-                  scaleAnims.current[index].setValue(newScale);
-                  setZoomScale((prev) => ({ ...prev, [index]: newScale }));
-                })
-                .onEnd(() => {
-                  // 缩放结束后，如果小于1，则重置为1
-                  const currentScale = zoomScale[index] || 1;
-                  if (currentScale < 1) {
-                    Animated.spring(scaleAnims.current[index], {
-                      toValue: 1,
-                      useNativeDriver: true,
-                    }).start();
-                    setZoomScale((prev) => ({ ...prev, [index]: 1 }));
-                  }
-                });
-
-              const panGesture = Gesture.Pan()
-                .enabled((zoomScale[index] || 1) > 1) // 只有在放大时才允许拖动
-                .onUpdate((event) => {
-                  const currentScale = zoomScale[index] || 1;
-                  if (currentScale > 1) {
-                    // 限制拖动范围，防止图片移出屏幕
-                    const maxTranslateX =
-                      (imageWidth * currentScale - windowWidth) / 2;
-                    const maxTranslateY =
-                      (imageHeight * currentScale - windowHeight) / 2;
-                    const newTranslateX = Math.max(
-                      -maxTranslateX,
-                      Math.min(maxTranslateX, event.translationX)
-                    );
-                    const newTranslateY = Math.max(
-                      -maxTranslateY,
-                      Math.min(maxTranslateY, event.translationY)
-                    );
-                    translateXAnims.current[index].setValue(newTranslateX);
-                    translateYAnims.current[index].setValue(newTranslateY);
-                    setTranslateX((prev) => ({
-                      ...prev,
-                      [index]: newTranslateX,
-                    }));
-                    setTranslateY((prev) => ({
-                      ...prev,
-                      [index]: newTranslateY,
-                    }));
-                  }
-                })
-                .onEnd(() => {
-                  // 拖动结束后，如果缩放回到1，重置位置
-                  const currentScale = zoomScale[index] || 1;
-                  if (currentScale <= 1) {
-                    Animated.parallel([
-                      Animated.spring(translateXAnims.current[index], {
-                        toValue: 0,
-                        useNativeDriver: true,
-                      }),
-                      Animated.spring(translateYAnims.current[index], {
-                        toValue: 0,
-                        useNativeDriver: true,
-                      }),
-                    ]).start();
-                    setTranslateX((prev) => ({ ...prev, [index]: 0 }));
-                    setTranslateY((prev) => ({ ...prev, [index]: 0 }));
-                  }
-                });
-
-              // ✅ 组合手势：同时支持缩放和拖动
-              const composedGesture = Gesture.Simultaneous(
-                pinchGesture,
-                panGesture
-              );
-
-              // ✅ 双击手势：双击放大/缩小
-              const doubleTapGesture = Gesture.Tap()
-                .numberOfTaps(2)
-                .onEnd(() => {
-                  const currentScale = zoomScale[index] || 1;
-                  const targetScale = currentScale > 1 ? 1 : 2; // 双击在1倍和2倍之间切换
-                  Animated.spring(scaleAnims.current[index], {
-                    toValue: targetScale,
-                    useNativeDriver: true,
-                  }).start();
-                  setZoomScale((prev) => ({ ...prev, [index]: targetScale }));
-                  // 如果缩小到1倍，重置位置
-                  if (targetScale === 1) {
-                    Animated.parallel([
-                      Animated.spring(translateXAnims.current[index], {
-                        toValue: 0,
-                        useNativeDriver: true,
-                      }),
-                      Animated.spring(translateYAnims.current[index], {
-                        toValue: 0,
-                        useNativeDriver: true,
-                      }),
-                    ]).start();
-                    setTranslateX((prev) => ({ ...prev, [index]: 0 }));
-                    setTranslateY((prev) => ({ ...prev, [index]: 0 }));
-                  }
-                });
-
-              // ✅ 单击手势：只有在未缩放时才能关闭
-              const singleTapGesture = Gesture.Tap()
-                .numberOfTaps(1)
-                .onEnd(() => {
-                  const currentScale = zoomScale[index] || 1;
-                  if (currentScale <= 1 && !isAnimating) {
-                    handleClose();
-                  }
-                });
-
-              const tapGesture = Gesture.Race(
-                doubleTapGesture,
-                singleTapGesture
-              );
-              const finalGesture = Gesture.Simultaneous(
-                composedGesture,
-                tapGesture
-              );
-
-              return (
-                <View
-                  style={[
-                    fullScreenStyles.imageContainer,
-                    { width: windowWidth },
-                  ]}
-                >
-                  {/* ✅ 使用 ScrollView 包裹，支持垂直滚动查看完整图片 */}
-                  <ScrollView
-                    contentContainerStyle={fullScreenStyles.scrollContent}
-                    showsVerticalScrollIndicator={false}
-                    bounces={false}
-                    scrollEnabled={(zoomScale[index] || 1) <= 1} // ✅ 只有在未缩放时才允许滚动
-                    nestedScrollEnabled={true} // ✅ 允许嵌套滚动
-                  >
-                    <GestureDetector gesture={finalGesture}>
-                      <Animated.View
-                        style={[
-                          fullScreenStyles.imageWrapper,
-                          {
-                            transform: [
-                              { scale: scaleAnims.current[index] },
-                              { translateX: translateXAnims.current[index] },
-                              { translateY: translateYAnims.current[index] },
-                            ],
-                          },
-                        ]}
-                      >
-                        <Animated.Image
-                          source={{ uri: item }}
-                          style={[
-                            fullScreenStyles.image,
-                            // ✅ 等比例显示：宽度固定为屏幕宽度，高度根据图片比例自动计算
-                            // 使用 aspectRatio 确保图片按原比例显示，不会被拉伸
-                            dimensions && dimensions.width && dimensions.height
-                              ? {
-                                  width: imageWidth,
-                                  aspectRatio:
-                                    dimensions.width / dimensions.height, // ✅ 使用 aspectRatio 保持原比例
-                                }
-                              : {
-                                  // ✅ 图片未加载完成时，使用默认尺寸（正方形）
-                                  width: imageWidth,
-                                  height: imageWidth,
-                                },
-                            // ✅ 只应用 opacity 动画，不应用 scale（scale 由手势控制）
-                            { opacity: imageOpacity },
-                          ]}
-                          resizeMode="contain" // ✅ 使用 contain，确保图片完整显示，不裁切
-                          onLoad={(event) => {
-                            // ✅ 获取图片实际尺寸，用于计算等比高度
-                            const { width, height } = event.nativeEvent.source;
-                            if (width && height) {
-                              console.log(
-                                `📐 图片 ${index} 实际尺寸: ${width}x${height}, 宽高比: ${(
-                                  height / width
-                                ).toFixed(2)}`
-                              );
-                              setImageDimensions((prev) => ({
-                                ...prev,
-                                [index]: { width, height },
-                              }));
-                            }
-                          }}
-                        />
-                      </Animated.View>
-                    </GestureDetector>
-                  </ScrollView>
-                </View>
-              );
-            }}
-          />
-
-          {/* 底部指示器（多张图片时显示） */}
-          {imageUrls.length > 1 && (
-            <Animated.View
-              style={[fullScreenStyles.footerWrapper, { opacity: opacityAnim }]}
-            >
-              <SafeAreaView style={fullScreenStyles.footer} edges={["bottom"]}>
-                <View style={fullScreenStyles.indicatorContainer}>
-                  <Text
-                    style={[
-                      fullScreenStyles.indicatorText,
-                      {
-                        fontFamily: getFontFamilyForText(
-                          `${currentIndex + 1} / ${imageUrls.length}`,
-                          "regular"
-                        ),
-                      },
-                    ]}
-                  >
-                    {currentIndex + 1} / {imageUrls.length}
-                  </Text>
-                </View>
-              </SafeAreaView>
-            </Animated.View>
-          )}
-        </View>
-      </Modal>
     </GestureHandlerRootView>
   );
-};
+}
 
-// ========== 全屏图片查看器样式 ==========
-const fullScreenStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  background: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000",
-  },
-  headerWrapper: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  header: {
-    paddingHorizontal: 20, // ✅ 增加右边距
-    paddingTop: 20, // ✅ 增加顶部间距
-    paddingBottom: 8,
-  },
-  closeButton: {
-    width: 36, // ✅ 稍微缩小，更精致
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0, 0, 0, 0.4)", // ✅ 降低背景透明度，更精致
-    justifyContent: "center",
-    alignItems: "center",
-    alignSelf: "flex-end",
-  },
-  imageContainer: {
-    flex: 1,
-    justifyContent: "center", // ✅ 垂直居中
-    alignItems: "center", // ✅ 水平居中
-  },
-  scrollContent: {
-    // ✅ ScrollView 内容容器样式：确保图片在容器内居中显示
-    // 参考微信实现：图片按原比例显示，在容器内居中
-    flexGrow: 1,
-    justifyContent: "center", // 垂直居中（当图片高度小于屏幕时）
-    alignItems: "center", // 水平居中
-    minHeight: Dimensions.get("window").height, // 最小高度为屏幕高度，确保可以滚动查看完整图片
-  },
-  imageWrapper: {
-    justifyContent: "center", // ✅ 垂直居中
-    alignItems: "center", // ✅ 水平居中
-  },
-  image: {
-    // ✅ 尺寸在 renderItem 中根据图片比例动态计算
-    // 宽度固定为屏幕宽度，高度根据图片宽高比自动计算，不限制最大高度
-  },
-  footerWrapper: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  indicatorContainer: {
-    alignSelf: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  indicatorText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-});
-
-// ========== 样式定义 ==========
-const { width } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   container: {
@@ -1664,7 +783,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: "75%",
+    // ✅ 修复：使用 minHeight 和 maxHeight 实现自适应高度
+    minHeight: "40%", // 最小高度，确保即使内容少也有合适的显示
+    maxHeight: "90%", // 最大高度，留出顶部空间
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -1678,16 +799,17 @@ const styles = StyleSheet.create({
 
   safeArea: {
     flex: 1,
+    maxHeight: "100%", // ✅ 确保不超过 modal 的高度
   },
 
   scrollView: {
-    flex: 1,
+    // ✅ 修复：移除 flex: 1，让 ScrollView 自适应内容高度
+    flexShrink: 1, // 允许收缩以适应父容器
   },
 
   scrollContent: {
-    flexGrow: 1,
-    paddingTop: 20, // ✅ 统一规则：第一个组件的间距由父容器的 paddingTop 控制
-    paddingBottom: 100, // 固定底部间距
+    paddingTop: 16, // ✅ 统一规则：第一个组件距离分割线的间距为 16px
+    paddingBottom: 24, // ✅ 修复：减少底部留白（原来是 100，太大了）
   },
 
   // ===== 加载状态 =====
@@ -1764,42 +886,20 @@ const styles = StyleSheet.create({
 
   // ===== 音频区域 =====
   audioSection: {
-    marginHorizontal: 20,
+    marginHorizontal: 24,
     marginTop: 0, // ✅ 禁用 marginTop
     marginBottom: 12, // ✅ 统一标准：语音距离下方内容 12px
   },
 
-  // ===== 日记内容卡片 =====
-  diaryCard: {
-    backgroundColor: "#FFFFFF", // ✅ 纯白色卡片背景
-    borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 20,
-    marginBottom: 12, // ✅ 统一规则：间距由 marginBottom 控制
-    borderWidth: 1,
-    borderColor: "#FFE3DA", // ✅ 温暖的桃色描边
-    overflow: "hidden", // ✅ 确保内部光晕不超出圆角
-  },
-
-  titleText: {
-    ...Typography.diaryTitle,
-    fontSize: 18,
-    color: "#1A1A1A",
-    letterSpacing: -0.5,
-    marginBottom: 0, // ✅ 由外层容器 View 的 marginBottom 控制
-  },
-
-  contentText: {
-    ...Typography.body,
-    lineHeight: 26,
-    color: "#1A1A1A",
-    letterSpacing: 0.2,
-    marginBottom: 0, // ✅ 移除底部间距，减少卡片底部空隙
+  // ===== 日记内容卡片覆盖样式 =====
+  diaryCardOverride: {
+    marginHorizontal: 24,
+    marginBottom: 12,
   },
 
   // ===== AI反馈区域 - 与语音记录页保持一致 =====
   feedbackCard: {
-    marginHorizontal: 20,
+    marginHorizontal: 24,
     marginBottom: 12, // ✅ 统一标准：距离下方 12px
     marginTop: 0,
   },
@@ -1809,7 +909,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20, // ⬅️ 调整这里：控制左右间距
+    paddingHorizontal: 24, // ⬅️ 调整这里：控制左右间距
     paddingTop: 12, // ⬅️ 调整这里：控制顶部间距
     paddingBottom: 8, // ⬅️ 调整这里：控制底部间距
     borderBottomWidth: 1,
@@ -1947,47 +1047,27 @@ const styles = StyleSheet.create({
     // 使用 contain 模式时，高度会根据图片比例自动计算
   },
   // 点状指示器
-  imageIndicatorContainer: {
-    position: "absolute",
-    bottom: Platform.OS === "ios" ? 24 : 20,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 8,
-    zIndex: 200,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  imageIndicatorDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#F2E2C2", // 非活跃状态：灰色
-  },
-  imageIndicatorDotActive: {
-    backgroundColor: "#E56C45", // 活跃状态：主题色
-    width: 24, // 活跃状态更长
-    height: 8,
-    borderRadius: 4,
-  },
+  
+  
+  
 
   // ===== 图片缩略图容器（图片+文字日记）- 动态列数 + 横向滚动 =====
-  imageThumbnailContainer: {
-    marginBottom: 12, // ✅ 统一规则：间距由 marginBottom 控制
-    // marginHorizontal: 20, // 移除 marginHorizontal，改用 contentContainerStyle padding
+  
+  
+  deleteButtonOverlay: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  imageThumbnailScrollContent: {
-    paddingHorizontal: 20, // 在 ScrollView 内容容器上添加 padding
-    flexDirection: "row",
-    // flexWrap: "wrap", // 移除 wrap，允许横向滚动
-  },
-  imageThumbnailWrapper: {
-    // 尺寸和边距在行内样式中动态计算
-    overflow: "hidden",
-    borderRadius: 8,
-  },
+  
   // imageThumbnailLastInRow: { // 不再需要，动态计算
   //   marginRight: 0,
   // },
@@ -2004,4 +1084,66 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
+
+  // ✅ Image Grid Styles (aligned with ImageDiaryModal & user request)
+  imageGridContainer: {
+    marginHorizontal: 24, // ✅ 左右间距24px，与其他内容元素保持一致
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  imageGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+  },
+  imageWrapper: {
+    width: (Dimensions.get("window").width - 24*2 - 24) / 4, // ✅ 24*2=左右margin, 24=3个8px间隙
+    height: (Dimensions.get("window").width - 24*2 - 24) / 4,
+    marginRight: 8,
+    marginBottom: 8,
+    borderRadius: 8,
+    overflow: "hidden", // This might be clipping the button if it's positioned outside, 
+                       // but in ImageDiaryModal it's 'hidden' and button is inside.
+    position: "relative",
+  },
+  imageWrapperLastInRow: {
+    marginRight: 0,
+  },
+  thumbnail: {
+    width: "100%",
+    height: "100%",
+  },
+  deleteButtonMask: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.4)", // Matches ImageDiaryModal
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+  },
+
+
+  imageIndicator: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    position: "absolute",
+    bottom: 20,
+    width: "100%",
+    gap: 8,
+  },
+  imageIndicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(0, 0, 0, 0.2)",
+  },
+  imageIndicatorDotActive: {
+    backgroundColor: "#E56C45",
+  },
+
 });

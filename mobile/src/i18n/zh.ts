@@ -261,6 +261,9 @@ export default {
     aiFeedback: "AI 反馈",
     createdAt: "创建时间",
     playAudio: "播放音频",
+    deleteImageConfirm: "要删除这张图片吗?",
+    deleteImageTitle: "", // ✅ 空标题，只显示一行确认文案
+    imageDeleted: "图片已删除",
   },
 
   // 错误提示

@@ -535,16 +535,50 @@ export default function RecordingModal({
       }
     });
 
-  // ✅ Modal 打开时自动开始录音
+  // ✅ Track auto-start attempts to prevent infinite loops
+  const autoStartAttemptedRef = useRef(false);
+  const startFailedRef = useRef(false);
+
+  // ✅ Modal 打开时自动开始录音（仅尝试一次）
   useEffect(() => {
-    if (visible && !isRecording && !isProcessing && !showResult) {
-      // ✅ 延迟一下,避免和关闭动画冲突
-      const timer = setTimeout(() => {
-        startRecording();
-      }, 100);
-      return () => clearTimeout(timer);
+    // Reset on modal close
+    if (!visible) {
+      autoStartAttemptedRef.current = false;
+      startFailedRef.current = false;
+      return;
     }
-  }, [visible, isRecording, isProcessing, showResult]);
+
+    // Only auto-start once per modal open
+    if (autoStartAttemptedRef.current) {
+      return;
+    }
+
+    // Don't auto-start if we're already in a valid state
+    if (isRecording || isProcessing || showResult || isStarting) {
+      return;
+    }
+
+    // Don't auto-start if previous attempt failed
+    if (startFailedRef.current) {
+      return;
+    }
+
+    // Mark as attempted
+    autoStartAttemptedRef.current = true;
+
+    // Delay to avoid animation conflicts
+    const timer = setTimeout(async () => {
+      try {
+        await startRecording();
+      } catch (error) {
+        console.error("Auto-start failed:", error);
+        startFailedRef.current = true;
+        // Don't retry automatically - user must manually retry
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [visible, isRecording, isProcessing, showResult, isStarting]);
 
   // ✅ 录音时保持屏幕常亮，防止自动锁屏导致录音中断
   useEffect(() => {
@@ -1531,19 +1565,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   resultScrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24, // ✅ 统一页边距为 24px
+    paddingTop: 16, // ✅ 分割线下方间距统一为 16px
     paddingBottom: 20,
   },
 
   resultAudioPlayer: {
-    marginTop: 16, // ✅ 增加顶部间距
+    marginTop: 0, // ✅ 间距由父容器 paddingTop 控制
     marginBottom: 12,
   },
   resultDiaryCard: {
     backgroundColor: "#FAF6ED",
     borderRadius: 12,
     padding: 16,
-    marginHorizontal: 20,
+    marginHorizontal: 0, // ✅ 移除外边距，改用 ScrollView 的内边距
     marginBottom: 12,
   },
 
@@ -1564,7 +1599,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8F9FA",
     borderRadius: 12,
     padding: 16,
-    marginHorizontal: 20,
+    marginHorizontal: 0, // ✅ 移除外边距
     marginBottom: 20,
   },
   resultFeedbackHeader: {
@@ -1586,7 +1621,7 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
   },
   resultBottomBar: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24, // ✅ 统一页边距为 24px
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
@@ -1638,8 +1673,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 20, // ✅ 增加顶部间距(原来是12)
+    paddingHorizontal: 24, // ✅ 统一页边距为 24px
+    paddingTop: 20,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",

@@ -24,6 +24,7 @@ import {
   getFontFamilyForText,
   detectTextLanguage, // ✅ 新增
 } from "../styles/typography";
+import ImagePreviewModal from "../components/ImagePreviewModal";
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -49,6 +50,7 @@ import {
   createAudioPlayer,
   type AudioPlayer as ExpoAudioPlayer,
 } from "expo-audio"; // ✅ 使用新的 expo-audio API
+import { Audio } from "expo-av"; // ✅ For setAudioModeAsync
 
 import * as Localization from "expo-localization";
 import { getGreeting } from "../config/greetings";
@@ -789,6 +791,23 @@ export default function DiaryListScreen() {
       } else {
         // 新播放：创建新的播放器
         console.log("🎵 创建音频播放器:", diary.audio_url);
+        
+        // ✅ FIX: Set correct audio mode for playback BEFORE creating player
+        // This ensures audio plays through speaker at normal volume
+        try {
+          await Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: true,
+            playThroughEarpieceAndroid: false,
+            // ✅ CRITICAL: allowsRecordingIOS must be false for playback
+            // When true, audio routes to earpiece/headset (very quiet)
+            allowsRecordingIOS: false,
+          });
+        } catch (error) {
+          console.warn("⚠️ Failed to set audio mode:", error);
+        }
+        
         player = createAudioPlayer(diary.audio_url!, {
           updateInterval: 100, // 每100ms更新一次状态
         });
@@ -1295,42 +1314,44 @@ export default function DiaryListScreen() {
         </View>
       </View>
 
-      {/* 分割线 */}
-      <View style={styles.divider} />
+      {/* 分割线 - 只在有日记时显示 */}
+      {diaries.length > 0 && <View style={styles.divider} />}
 
-       {/* 我的日记标题 - 强制渲染以调试 */}
-       <View style={styles.sectionTitleContainer}>
-         <PreciousMomentsIcon width={20} height={20} />
-         <Text
-           style={[
-             styles.sectionTitle,
-             {
-               color: "#80645A", // 使用和时间一样的颜色
-               fontFamily: getFontFamilyForText(t("home.myDiary"), "regular"),
-             },
-           ]}
-         >
-           {t("home.myDiaryPrefix")}
-           {" "}
+       {/* 我的日记标题 - 只在有至少一条日记时显示 */}
+       {diaries.length > 0 && (
+         <View style={styles.sectionTitleContainer}>
+           <PreciousMomentsIcon width={20} height={20} />
            <Text
              style={[
                styles.sectionTitle,
                {
-                 color: "#FF6B35",
-                 fontWeight: "bold",
-                 fontFamily: getFontFamilyForText(
-                   diaries.length.toString(),
-                   "bold"
-                 ),
+                 color: "#80645A", // 使用和时间一样的颜色
+                 fontFamily: getFontFamilyForText(t("home.myDiary"), "regular"),
                },
              ]}
            >
-             {diaries.length}
+             {t("home.myDiaryPrefix")}
+             {" "}
+             <Text
+               style={[
+                 styles.sectionTitle,
+                 {
+                   color: "#FF6B35",
+                   fontWeight: "bold",
+                   fontFamily: getFontFamilyForText(
+                     diaries.length.toString(),
+                     "bold"
+                   ),
+                 },
+               ]}
+             >
+               {diaries.length}
+             </Text>
+             {" "}
+             {t("home.myDiarySuffix")}
            </Text>
-           {" "}
-           {t("home.myDiarySuffix")}
-         </Text>
-       </View>
+         </View>
+       )}
     </View>
   );
 
@@ -1347,165 +1368,105 @@ export default function DiaryListScreen() {
     const renderImageGrid = (imageUrls: string[]) => {
       if (!imageUrls.length) return null;
 
-      const gap = 8;
-      const padding = 40; // card padding (20*2)
+      // ============================================================================
+      // Best Practice Image Grid Layout
+      // ============================================================================
+      // Requirements:
+      // - Single row only (no wrapping)
+      // - Max 3 images displayed
+      // - If ≥3 images, show "+N" badge on 3rd image
+      // - Consistent height for all layouts (1, 2, or 3 images)
+      // - Height calculated based on 3-column scenario
+      // - Width adjusts dynamically based on image count
+      // - 24px distance from card edges
+      //
+      const GAP = 8;
+      const CARD_PADDING = 24;
+      const PAGE_MARGIN = 24;
+      const TOTAL_HORIZONTAL_PADDING = (CARD_PADDING + PAGE_MARGIN) * 2; // 96px
+      
       const screenWidth = Dimensions.get("window").width;
-      const availableWidth = screenWidth - padding - 40; // 40 is list padding
-      const baseColumns = 3;
-      const rowHeight =
-        (availableWidth - (baseColumns - 1) * gap) / baseColumns;
+      const availableWidth = screenWidth - TOTAL_HORIZONTAL_PADDING;
+      
+      // Height based on 3-column layout (standard)
+      const IMAGE_HEIGHT = Math.floor((availableWidth - 2 * GAP) / 3);
+      
+      const imageCount = imageUrls.length;
+      const displayCount = Math.min(imageCount, 3); // Max 3 images
+      const hasMore = imageCount > 3;
+      const remainingCount = imageCount - 3;
 
-      if (imageUrls.length === 1) {
-        return (
-          <Pressable
-            onPress={(event) => {
-              event?.stopPropagation?.();
-              setImagePreviewUrls(imageUrls);
-              setImagePreviewIndex(0);
-              setImagePreviewVisible(true);
-            }}
-          >
-            <Image
-              source={{ uri: imageUrls[0] }}
-              style={{
-                width: availableWidth,
-                height: rowHeight,
-                borderRadius: 12,
-                backgroundColor: "#f0f0f0",
-              }}
-              resizeMode="cover"
-            />
-          </Pressable>
-        );
+      // Calculate width based on actual display count
+      let imageWidth: number;
+      if (displayCount === 1) {
+        imageWidth = availableWidth;
+      } else if (displayCount === 2) {
+        imageWidth = Math.floor((availableWidth - GAP) / 2);
+      } else {
+        imageWidth = Math.floor((availableWidth - 2 * GAP) / 3);
       }
 
-      if (imageUrls.length === 2) {
-        const imageWidth = (availableWidth - gap) / 2;
-        return (
-          <View style={{ flexDirection: "row", gap }}>
-            {imageUrls.slice(0, 2).map((url, imgIndex) => (
-              <Pressable
-                key={imgIndex}
-                onPress={(event) => {
-                  event?.stopPropagation?.();
-                  setImagePreviewUrls(imageUrls);
-                  setImagePreviewIndex(imgIndex);
-                  setImagePreviewVisible(true);
-                }}
-              >
-                <Image
-                  source={{ uri: url }}
-                  style={{
-                    width: imageWidth,
-                    height: rowHeight,
-                    borderRadius: 12,
-                    backgroundColor: "#f0f0f0",
-                  }}
-                  resizeMode="cover"
-                />
-              </Pressable>
-            ))}
-          </View>
-        );
-      }
-
-      const numColumns = imageUrls.length > 3 ? 4 : 3;
-      const imageSize = (availableWidth - (numColumns - 1) * gap) / numColumns;
-      const maxItems = numColumns;
-      const shouldShowBadge = imageUrls.length > maxItems;
-      const displayCount = shouldShowBadge ? maxItems : imageUrls.length;
-
-      if (!shouldShowBadge) {
-        return (
-          <>
-            {imageUrls.slice(0, displayCount).map((url, imgIndex) => (
-              <Pressable
-                key={imgIndex}
-                onPress={(event) => {
-                  event?.stopPropagation?.();
-                  setImagePreviewUrls(imageUrls);
-                  setImagePreviewIndex(imgIndex);
-                  setImagePreviewVisible(true);
-                }}
-              >
-                <Image
-                  source={{ uri: url }}
-                  style={{
-                    width: imageSize,
-                    height: imageSize,
-                    borderRadius: 8,
-                    backgroundColor: "#f0f0f0",
-                  }}
-                  resizeMode="cover"
-                />
-              </Pressable>
-            ))}
-          </>
-        );
-      }
-
-      const previewImages = imageUrls.slice(0, maxItems);
       return (
-        <>
-          {previewImages.slice(0, 3).map((url, imgIndex) => (
-            <Pressable
-              key={imgIndex}
-              onPress={(event) => {
-                event?.stopPropagation?.();
-                setImagePreviewUrls(imageUrls);
-                setImagePreviewIndex(imgIndex);
-                setImagePreviewVisible(true);
-              }}
-            >
-              <Image
-                source={{ uri: url }}
-                style={{
-                  width: imageSize,
-                  height: imageSize,
-                  borderRadius: 8,
-                  backgroundColor: "#f0f0f0",
+        <View style={{ flexDirection: "row" }}>
+          {imageUrls.slice(0, displayCount).map((url, index) => {
+            const isLast = index === displayCount - 1;
+            const showBadge = isLast && hasMore;
+
+            return (
+              <Pressable
+                key={index}
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  setImagePreviewUrls(imageUrls);
+                  setImagePreviewIndex(index);
+                  setImagePreviewVisible(true);
                 }}
-                resizeMode="cover"
-              />
-            </Pressable>
-          ))}
-          <Pressable
-            onPress={(event) => {
-              event?.stopPropagation?.();
-              setImagePreviewUrls(imageUrls);
-              setImagePreviewIndex(3);
-              setImagePreviewVisible(true);
-            }}
-            style={[
-              styles.moreBadge,
-              {
-                width: imageSize,
-                height: imageSize,
-                borderRadius: 8,
-              },
-            ]}
-          >
-            <Image
-              source={{ uri: previewImages[3] }}
-              style={styles.moreBadgeImage}
-              resizeMode="cover"
-            />
-            <View style={styles.moreBadgeOverlay} />
-            <Text
-              style={[
-                styles.moreText,
-                {
-                  fontFamily: getFontFamilyForText(
-                    `+${imageUrls.length - maxItems}`,
-                    "regular"
-                  ),
-                },
-              ]}
-            >
-              +{imageUrls.length - maxItems}
-            </Text>
-          </Pressable>
-        </>
+                style={{
+                  width: imageWidth,
+                  height: IMAGE_HEIGHT,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  backgroundColor: "#f0f0f0",
+                  marginRight: isLast ? 0 : GAP,
+                }}
+              >
+                <Image
+                  source={{ uri: url }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                  }}
+                  resizeMode="cover"
+                />
+                
+                {showBadge && (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: "rgba(0, 0, 0, 0.5)",
+                      justifyContent: "center",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#fff",
+                        fontSize: 20,
+                        fontWeight: "600",
+                      }}
+                    >
+                      +{remainingCount}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
       );
     };
 
@@ -1928,62 +1889,13 @@ export default function DiaryListScreen() {
         />
       )}
 
-      {/* 全屏图片预览 */}
-      <Modal
+      {/* World-Class Image Preview */}
+      <ImagePreviewModal
         visible={imagePreviewVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setImagePreviewVisible(false)}
-      >
-        <View style={styles.imagePreviewOverlay}>
-          <TouchableOpacity
-            style={styles.imagePreviewClose}
-            onPress={() => setImagePreviewVisible(false)}
-            accessibilityLabel={t("common.close")}
-            accessibilityRole="button"
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close" size={28} color="#fff" />
-          </TouchableOpacity>
-
-          <FlatList
-            ref={imagePreviewListRef}
-            data={imagePreviewUrls}
-            keyExtractor={(item, idx) => `${item}-${idx}`}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            initialScrollIndex={imagePreviewIndex}
-            getItemLayout={(_, index) => ({
-              length: Dimensions.get("window").width,
-              offset: Dimensions.get("window").width * index,
-              index,
-            })}
-            onMomentumScrollEnd={(event) => {
-              const width = Dimensions.get("window").width;
-              const nextIndex = Math.round(
-                event.nativeEvent.contentOffset.x / width
-              );
-              setImagePreviewIndex(nextIndex);
-            }}
-            renderItem={({ item }) => (
-              <View style={styles.imagePreviewSlide}>
-                <Image
-                  source={{ uri: item }}
-                  style={styles.imagePreviewImage}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
-          />
-
-          {imagePreviewUrls.length > 1 && (
-            <Text style={styles.imagePreviewCounter}>
-              {imagePreviewIndex + 1} / {imagePreviewUrls.length}
-            </Text>
-          )}
-        </View>
-      </Modal>
+        images={imagePreviewUrls}
+        initialIndex={imagePreviewIndex}
+        onClose={() => setImagePreviewVisible(false)}
+      />
 
       {/* iOS 轻量 Toast 提示 - 使用全屏容器确保居中 */}
       {Platform.OS === "ios" && toastVisible && (
@@ -2162,29 +2074,29 @@ const styles = StyleSheet.create({
   // ===== 日记卡片 =====
   diaryCard: {
     backgroundColor: "#fff",
-    borderRadius: 16,
+    borderRadius: 20,
     // padding: 20, // ❌ 移除父容器 Padding，防止裁剪光晕
     // paddingTop: 20,
     // paddingBottom: 8,
-    marginHorizontal: 20,
+    marginHorizontal: 24,
     marginBottom: 12,
-    // ✅ 自然轻盈的弥散投影
-    shadowColor: "#FFEDE0",
+    // ✅ 更加优雅的超弥散投影
+    shadowColor: "#FFD1B0",
     shadowOffset: {
       width: 0,
-      height: 4, // 轻微向下偏移，营造自然浮起感
+      height: 6, // 稍微拉开高度，增加浮空感
     },
-    shadowOpacity: 1, // 半透明，保持轻盈感
-    shadowRadius: 10, // 较大的模糊半径，营造弥散效果
-    elevation: 3, // Android 阴影（数值较小，保持轻盈）
+    shadowOpacity: 0.4, // 大幅降低透明度，让视觉更轻盈
+    shadowRadius: 20, // 增大半径，实现更广的弥散效果
+    elevation: 2, // Android 阴影也同步调轻
     // overflow: "hidden", // ❌ 移除，否则 iOS 阴影会消失！圆角由内部组件匹配。
   },
 
   // ✅ 新增：内容内边距容器
   cardContentContainer: {
-    padding: 20,
-    paddingTop: 20,
-    paddingBottom: 20, // ✅ 时间部分距离底部的间距改为 20px
+    padding: 24,
+    paddingTop: 24,
+    paddingBottom: 24, // ✅ 时间部分距离底部的间距改为 24px
     zIndex: 1, // 确保内容在光晕之上
   },
 
@@ -2233,16 +2145,28 @@ const styles = StyleSheet.create({
     textAlign: "left",
   },
 
-  // 图片网格样式
+  // ============================================================================
+  // Image Grid Styles (Using Production-Grade Layout System)
+  // ============================================================================
+  // 
+  // Design: 3 columns with 8px gap
+  // Context: Inside diary card (24px card padding) + page padding (24px)
+  // Total horizontal padding: 24 + 24 + 24 + 24 = 96px
+  // Available width: screenWidth - 96px
+  // Image size: (availableWidth - 2 gaps × 8px) / 3
+  //
   imageGrid: {
     flexDirection: "row",
-    marginTop: 0, // ✅ 禁用 marginTop
-    marginBottom: 12, // ✅ 统一标准：图片距离下方内容 12px
-    gap: 8,
+    // flexWrap removed - single row only
+    marginTop: 0,
+    marginBottom: 12,
+    // gap removed - handled by marginRight
   },
   imageThumbnail: {
-    width: (Dimensions.get("window").width - 80) / 3.3, // 3张缩略图 + 间距
-    height: (Dimensions.get("window").width - 80) / 3.3,
+    // Dynamic calculation: (screenWidth - 96px - 16px) / 3
+    // 96px = total padding, 16px = 2 gaps × 8px
+    width: Math.floor((Dimensions.get("window").width - 96 - 16) / 3),
+    height: Math.floor((Dimensions.get("window").width - 96 - 16) / 3),
     borderRadius: 8,
     backgroundColor: "#f0f0f0",
   },
@@ -2550,11 +2474,11 @@ const styles = StyleSheet.create({
     shadowColor: "#E56C45",
     shadowOffset: {
       width: 0,
-      height: 6,
+      height: 8,
     },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
   },
 
   actionButton: {

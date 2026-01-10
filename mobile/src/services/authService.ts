@@ -263,6 +263,9 @@ export async function signInWithGoogle(): Promise<User> {
     authUrl.searchParams.set("identity_provider", "Google");
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
+    // ✅ 添加 prompt=select_account 参数，强制显示账号选择界面
+    // 这样用户每次登录时都可以选择要使用的Google账号
+    authUrl.searchParams.set("prompt", "select_account");
 
     console.log("🌐 打开Google登录页面:", authUrl.toString());
 

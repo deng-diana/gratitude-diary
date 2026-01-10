@@ -266,6 +266,9 @@ export default {
     aiFeedback: "Reflection",
     createdAt: "Created",
     playAudio: "Play Audio",
+    deleteImageConfirm: "Delete this image?",
+    deleteImageTitle: "", // ✅ Empty title for single-line display
+    imageDeleted: "Image deleted",
   },
 
   // 错误提示

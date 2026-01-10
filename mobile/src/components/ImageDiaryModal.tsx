@@ -53,9 +53,26 @@ import { EmotionCapsule } from "./EmotionCapsule";
 import { Typography, getFontFamilyForText } from "../styles/typography";
 import DiaryResultView from "./DiaryResultView"; // ✅ 导入共享组件
 
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-// 4列布局：左右padding 20*2=40，3个间距 8*3=6，尽可能填满宽度，不留多余空白
-const THUMBNAIL_SIZE = Math.floor((SCREEN_WIDTH - 40 - 24) / 4); // 4列，紧凑布局，向下取整
+
+// ============================================================================
+// Image Grid Layout Configuration
+// ============================================================================
+//
+// Image Picker Grid: 4 columns with 8px gap
+// Horizontal padding: 20px (left) + 20px (right) = 40px
+// Total gap width: 3 gaps × 8px = 24px
+// Available width: screenWidth - 40px - 24px
+// Image size: availableWidth / 4
+//
+const HORIZONTAL_PADDING = 20;  // Page padding for image picker
+const IMAGE_GAP = 8;            // Gap between images
+const COLUMNS = 4;              // 4 columns for compact layout
+const TOTAL_GAPS = (COLUMNS - 1) * IMAGE_GAP;  // 24px
+const AVAILABLE_WIDTH = SCREEN_WIDTH - (HORIZONTAL_PADDING * 2) - TOTAL_GAPS;
+const THUMBNAIL_SIZE = Math.floor(AVAILABLE_WIDTH / COLUMNS);
+
 
 interface ImageDiaryModalProps {
   visible: boolean;
@@ -1576,51 +1593,34 @@ export default function ImageDiaryModal({
                         <TouchableOpacity
                           style={styles.inputVoiceButton}
                           onPress={async () => {
-                            // ✅ 进入录音模式
                             try {
-                              setIsRecordingMode(true);
-
-                              // ✅ 关键修复1：先停止并清理所有音频播放器
+                              // Clean up audio player if playing
                               if (resultSoundRef.current) {
                                 try {
                                   await resultSoundRef.current.stopAsync();
                                   await resultSoundRef.current.unloadAsync();
+                                  resultSoundRef.current = null;
+                                  setIsPlayingResult(false);
                                 } catch (error) {
-                                  console.log(
-                                    "清理音频播放器时出错（可忽略）:",
-                                    error
-                                  );
+                                  console.log("Audio cleanup error (ignorable):", error);
                                 }
-                                resultSoundRef.current = null;
-                                setIsPlayingResult(false);
                               }
 
-                              // ✅ 关键修复2：先取消之前的录音，确保录音对象被完全清理
-                              try {
-                                await cancelRecording();
-                              } catch (error) {
-                                console.log(
-                                  "取消之前的录音时出错（可忽略）:",
-                                  error
-                                );
-                              }
+                              // Cancel any existing recording (hook handles cleanup)
+                              await cancelRecording();
 
-                              // ✅ 关键修复3：增加等待时间，确保音频系统完全准备好
-                              // 先等待 200ms 让音频播放器完全停止
-                              await new Promise((resolve) =>
-                                setTimeout(resolve, 200)
-                              );
-                              // 再等待 100ms 让音频系统完全重置
-                              await new Promise((resolve) =>
-                                setTimeout(resolve, 100)
-                              );
+                              // Small delay to ensure cleanup completes
+                              await new Promise((resolve) => setTimeout(resolve, 200));
 
-                              // ✅ 现在可以安全地开始录音
+                              // Enter recording mode
+                              setIsRecordingMode(true);
+
+                              // Start recording (hook handles all the complexity)
                               await startRecording();
                             } catch (error) {
-                              console.error("启动录音失败:", error);
-                              Alert.alert("错误", "启动录音失败，请重试");
+                              console.error("Failed to start recording:", error);
                               setIsRecordingMode(false);
+                              // Error alert is already shown by the hook
                             }
                           }}
                           activeOpacity={0.8}
@@ -1928,7 +1928,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingVertical: 16,
   },
   closeButton: {
@@ -1949,8 +1949,8 @@ const styles = StyleSheet.create({
   headerDivider: {
     height: 1,
     backgroundColor: "#F0F0F0",
-    marginHorizontal: 20,
-    marginBottom: 20, // ✅ 统一规则：分割线/标题组件 marginBottom 为 20px
+    marginHorizontal: 20, // ✅ 还原为 20px
+    marginBottom: 16, // ✅ 分割线下方间距统一为 16px
   },
   saveText: {
     fontSize: 16,
@@ -1967,7 +1967,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20, // 减少左右 padding，让图片更紧凑
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingBottom: 120, // 增加底部 padding，为工具栏留出空间
   },
   imageGrid: {
@@ -2391,8 +2391,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   resultScrollContent: {
+    paddingTop: 16, // ✅ 分割线下方间距统一为 16px
     paddingBottom: 20, // ✅ 与 RecordingModal 保持一致
-    paddingHorizontal: 20,
+    paddingHorizontal: 20, // ✅ 还原为 20px
   },
   resultImageGrid: {
     flexDirection: "row",
@@ -2474,7 +2475,7 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
   },
   resultBottomBar: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",

@@ -13,12 +13,14 @@ import {
   DrawerContentComponentProps,
   DrawerContentScrollView,
 } from "@react-navigation/drawer";
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { t } from "../i18n";
 import { getTypography, getFontFamilyForText } from "../styles/typography";
 import AvatarDefault from "../assets/icons/avatar-default.svg";
 import { getCurrentUser, signOut, type User } from "../services/authService";
 import { deleteAccount } from "../services/accountService";
+import { navigationRef } from "../navigation/navigationRef";
 
 export default function AppDrawerContent(props: DrawerContentComponentProps) {
   const { navigation } = props;
@@ -86,36 +88,114 @@ export default function AppDrawerContent(props: DrawerContentComponentProps) {
     }
 
     setIsDeletingAccount(true);
+    closeDrawer(); // 先关闭 drawer
+    
     try {
+      console.log("🗑️ 开始删除账号...");
       await deleteAccount();
       await signOut();
-      navigation.getParent()?.reset({
-        index: 0,
-        routes: [{ name: "Welcome" }],
-      });
+      console.log("✅ 账号删除成功，导航到 Welcome 页面");
+      
+      // ✅ 使用 navigationRef 可靠地重置到根导航器的 Welcome 屏幕
+      if (navigationRef.isReady()) {
+        navigationRef.reset({
+          index: 0,
+          routes: [{ name: "Welcome" as never }],
+        });
+      } else {
+        // 如果 navigationRef 还没准备好，使用备用方法
+        const root = navigation.getParent?.();
+        if (root) {
+          root.reset({
+            index: 0,
+            routes: [{ name: "Welcome" as never }],
+          });
+        } else {
+          console.error("❌ 无法找到根导航器，删除账号后导航失败");
+        }
+      }
     } catch (error: any) {
       console.error("❌ 删除账号失败:", error);
       Alert.alert(
         t("error.deleteAccountTitle"),
         t("error.deleteAccountFailed")
       );
-    } finally {
-      setIsDeletingAccount(false);
-      closeDrawer();
+      setIsDeletingAccount(false); // 只有失败时才重置状态
     }
   };
 
   const handleSignOut = async () => {
     try {
+      closeDrawer(); // 先关闭 drawer
+      
+      console.log("🔄 开始退出登录流程...");
+      
+      // ✅ 先清除 tokens
       await signOut();
-      navigation.getParent()?.reset({
-        index: 0,
-        routes: [{ name: "Login" }],
-      });
+      console.log("✅ Tokens已清除");
+      
+      // ✅ 使用 CommonActions.reset 确保导航重置正确执行
+      console.log("🔄 开始导航重置...");
+      
+      // 优先使用 navigationRef（最可靠的方法）
+      if (navigationRef.isReady()) {
+        console.log("✅ 使用 navigationRef.dispatch(CommonActions.reset())");
+        try {
+          navigationRef.dispatch(
+            CommonActions.reset({
+              index: 0,
+              routes: [{ name: "Login" }],
+            })
+          );
+          console.log("✅ navigationRef 导航重置执行成功");
+          return; // 成功就返回
+        } catch (error) {
+          console.error("❌ navigationRef.reset() 失败:", error);
+        }
+      }
+      
+      // 备用方法：使用 navigation.getParent() 找到根导航器
+      console.log("⚠️ 使用备用方法：navigation.getParent()");
+      try {
+        // AppDrawerContent 在 Drawer 中，Drawer 的父级是 Root Stack Navigator
+        const root = navigation.getParent?.();
+        if (root) {
+          console.log("✅ 找到根导航器，使用 CommonActions.reset()");
+          if (typeof root.dispatch === "function") {
+            root.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [{ name: "Login" }],
+              })
+            );
+            console.log("✅ 根导航器 reset() 执行成功");
+          } else if (typeof root.reset === "function") {
+            // 兼容旧版本 API
+            root.reset({
+              index: 0,
+              routes: [{ name: "Login" }],
+            });
+            console.log("✅ 根导航器 reset() (旧API) 执行成功");
+          } else {
+            console.error("❌ 根导航器没有 reset 或 dispatch 方法");
+          }
+        } else {
+          console.error("❌ 无法找到根导航器");
+        }
+      } catch (error) {
+        console.error("❌ 备用方法也失败:", error);
+      }
+      
+      console.log("✅ 退出登录流程完成");
     } catch (error) {
-      console.error("登出失败:", error);
-    } finally {
-      closeDrawer();
+      console.error("❌ 登出失败:", error);
+      // 即使出错也尝试清除 tokens
+      try {
+        await signOut();
+      } catch (signOutError) {
+        console.error("❌ 清除 tokens 失败:", signOutError);
+      }
+      closeDrawer(); // 确保 drawer 被关闭
     }
   };
 

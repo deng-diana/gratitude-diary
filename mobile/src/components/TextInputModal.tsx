@@ -845,7 +845,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingVertical: 16,
   },
   closeButton: {
@@ -867,15 +867,15 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#F0F0F0",
     marginHorizontal: 20,
-    marginBottom: 8, // 分割线与输入框之间的间距
+    marginBottom: 20, // ✅ 遵循只设置 marginBottom 的原则，通过这里控制下方间距
   },
   inputArea: {
     flex: 1,
   },
   inputScrollContent: {
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-    paddingBottom: 40, // ✅ 增加底部间距，确保按钮在键盘上方可见
+    paddingHorizontal: 20,
+    paddingTop: 0, // ✅ 移除 paddingTop，由上方组件的 marginBottom 控制
+    paddingBottom: 40,
   },
   inputContainer: {
     position: "relative",
@@ -919,7 +919,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingTop: 20,
     paddingBottom: 12,
     borderBottomWidth: 1,
@@ -948,12 +948,12 @@ const styles = StyleSheet.create({
     flex: 1, // ✅ 与 RecordingModal 保持一致
   },
   resultScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingHorizontal: 20, // ✅ 还原为 20px
+    paddingTop: 16, // ✅ 分割线下方间距统一为 16px
     paddingBottom: 20, // ✅ 增加底部间距，确保内容不会被底部按钮遮挡
   },
   resultBottomBar: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 20, // ✅ 还原为 20px
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",

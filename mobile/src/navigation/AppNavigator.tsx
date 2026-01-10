@@ -192,7 +192,13 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        // ✅ 导航容器准备好后，再次检查认证状态，确保状态同步
+        checkAuthStatus();
+      }}
+    >
       <Stack.Navigator
         initialRouteName={getInitialRouteName()}
         screenOptions={{

@@ -27,16 +27,16 @@
 // 获取方法：
 //   - Mac: 系统设置 > 网络 > 查看IP地址 或运行: ifconfig | grep "inet " | grep -v 127.0.0.1
 //   - Windows: ipconfig 查看 IPv4 地址
-const LOCAL_IP = "192.168.0.20"; // ⚠️ 修改为你的电脑IP地址
+const LOCAL_IP = "192.168.0.94"; // ⚠️ 修改为你的电脑IP地址
 
-// 📱 生产环境URL（连接AWS Lambda）
-const PRODUCTION_URL =
-  "https://ae6kqvtgdq5lvbughd4qweo7uq0fgxvf.lambda-url.us-east-1.on.aws/";
+// 📱 生产环境URL（连接 API Gateway）
+// 🎯 使用自定义域名（2026-01-10 配置）
+const PRODUCTION_URL = "https://api.thankly.app";
 
 // 🔄 环境切换：true = 本地开发，false = 生产环境
 // ⚠️⚠️⚠️ 上线前必须改为 false！⚠️⚠️⚠️
 // 📦 打包前检查：运行 npm run build 前，确保这里改为 false
-const IS_LOCAL_DEV = false; // ✅ 本地开发模式 (连接到 http://192.168.0.20:8000)
+const IS_LOCAL_DEV = true; // ✅ 本地开发模式 (连接到 http://192.168.0.20:8000)
 
 // 🎯 智能API地址配置
 // 策略：

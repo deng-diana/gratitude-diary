@@ -1,5 +1,11 @@
 import React from "react";
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { t } from "../i18n";
 import { getFontFamilyForText, Typography } from "../styles/typography";
 import MicIconOrange from "../assets/icons/micIconOrange.svg";
@@ -25,7 +31,9 @@ type VoiceRecordingPanelProps = {
 const formatTime = (seconds: number) => {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  return `${mins.toString().padStart(2, "0")}:${secs
+    .toString()
+    .padStart(2, "0")}`;
 };
 
 export default function VoiceRecordingPanel({
@@ -87,11 +95,16 @@ export default function VoiceRecordingPanel({
             </>
           )}
 
-          <Animated.View style={[styles.iconContainer, { transform: [{ scale: pulseAnim }] }]}>
+          <Animated.View
+            style={[
+              styles.iconContainer,
+              { transform: [{ scale: pulseAnim }] },
+            ]}
+          >
             {isPaused ? (
-              <PauseIconOrange width={44} height={44} />
+              <PauseIconOrange width={40} height={40} />
             ) : (
-              <MicIconOrange width={44} height={44} />
+              <MicIconOrange width={36} height={36} />
             )}
           </Animated.View>
 
@@ -100,20 +113,33 @@ export default function VoiceRecordingPanel({
               styles.statusText,
               {
                 fontFamily: getFontFamilyForText(
-                  isPaused ? t("diary.pauseRecording") : nearLimit ? t("recording.nearLimit") : "",
+                  isPaused
+                    ? t("diary.pauseRecording")
+                    : nearLimit
+                    ? t("recording.nearLimit")
+                    : "",
                   "regular"
                 ),
               },
             ]}
           >
-            {isPaused ? t("diary.pauseRecording") : nearLimit ? t("recording.nearLimit") : ""}
+            {isPaused
+              ? t("diary.pauseRecording")
+              : nearLimit
+              ? t("recording.nearLimit")
+              : ""}
           </Text>
 
           <View style={styles.timeRow}>
             <Text
               style={[
                 styles.durationText,
-                { fontFamily: getFontFamilyForText(formatTime(duration), "regular") },
+                {
+                  fontFamily: getFontFamilyForText(
+                    formatTime(duration),
+                    "regular"
+                  ),
+                },
               ]}
             >
               {formatTime(duration)}
@@ -142,7 +168,12 @@ export default function VoiceRecordingPanel({
             <Text
               style={[
                 styles.cancelText,
-                { fontFamily: getFontFamilyForText(t("common.cancel"), "regular") },
+                {
+                  fontFamily: getFontFamilyForText(
+                    t("common.cancel"),
+                    "regular"
+                  ),
+                },
               ]}
             >
               {t("common.cancel")}
@@ -153,15 +184,23 @@ export default function VoiceRecordingPanel({
             style={styles.pauseButton}
             onPress={onTogglePause}
             accessibilityLabel={
-              isPaused ? t("createVoiceDiary.resumeRecording") : t("createVoiceDiary.pauseRecording")
+              isPaused
+                ? t("createVoiceDiary.resumeRecording")
+                : t("createVoiceDiary.pauseRecording")
             }
             accessibilityHint={
-              isPaused ? t("accessibility.button.recordHint") : t("accessibility.button.stopHint")
+              isPaused
+                ? t("accessibility.button.recordHint")
+                : t("accessibility.button.stopHint")
             }
             accessibilityRole="button"
             accessibilityState={{ selected: !isPaused }}
           >
-            {isPaused ? <PlayIconWhite width={32} height={32} /> : <PauseIconWhite width={32} height={32} />}
+            {isPaused ? (
+              <PlayIconWhite width={32} height={32} />
+            ) : (
+              <PauseIconWhite width={32} height={32} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -174,7 +213,12 @@ export default function VoiceRecordingPanel({
             <Text
               style={[
                 styles.finishText,
-                { fontFamily: getFontFamilyForText(t("common.done"), "semibold") },
+                {
+                  fontFamily: getFontFamilyForText(
+                    t("common.done"),
+                    "semibold"
+                  ),
+                },
               ]}
             >
               {t("common.done")}

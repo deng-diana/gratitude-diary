@@ -1,11 +1,13 @@
 /**
  * useVoiceRecording Hook
  *
- * 📚 学习点：自定义 Hook (Custom Hook)
- * 1. **逻辑复用**：将复杂的录音逻辑（权限、状态、定时器、音频模式）封装在一起，
- *    让不同的组件（如 RecordingModal 和 ImageDiaryModal）可以共享同一套逻辑。
- * 2. **关注点分离**：UI 组件只负责展示，Hook 负责业务逻辑。
- * 3. **易于测试**：逻辑独立后，可以更方便地进行单元测试。
+ * Production-grade voice recording hook with robust error handling and resource management.
+ * 
+ * Key principles:
+ * - Single source of truth for recording state
+ * - Explicit resource lifecycle management
+ * - Graceful degradation on errors
+ * - No silent failures
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -13,8 +15,63 @@ import { Audio } from "expo-av";
 import { Alert, AppState } from "react-native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
-let globalRecordingRef: Audio.Recording | null = null;
-let globalPreparing = false;
+// ============================================================================
+// Global State Management
+// ============================================================================
+// We use a global singleton to prevent multiple recording instances
+// This is critical because iOS/Android only allow ONE active recording at a time
+
+let globalRecordingInstance: Audio.Recording | null = null;
+let globalIsPreparingRecording = false;
+
+/**
+ * Safely cleanup a recording instance
+ * This is the ONLY way to properly release native audio resources
+ */
+async function safeCleanupRecording(recording: Audio.Recording | null): Promise<void> {
+  if (!recording) return;
+  
+  try {
+    // stopAndUnloadAsync is the ONLY correct method for Recording objects
+    // It stops recording (if active) AND releases native resources
+    await recording.stopAndUnloadAsync();
+    console.log("✅ Recording instance cleaned up successfully");
+  } catch (error) {
+    // This is expected if recording was never started or already cleaned up
+    console.log("💡 Recording cleanup completed (was already stopped)");
+  }
+}
+
+/**
+ * Force reset global state
+ * Use this as a last resort when things go wrong
+ */
+async function forceResetGlobalState(): Promise<void> {
+  console.log("🔄 Force resetting global recording state...");
+  
+  if (globalRecordingInstance) {
+    await safeCleanupRecording(globalRecordingInstance);
+    globalRecordingInstance = null;
+  }
+  
+  globalIsPreparingRecording = false;
+  
+  // Reset audio mode to default
+  try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+    });
+  } catch (error) {
+    console.log("Could not reset audio mode:", error);
+  }
+  
+  console.log("✅ Global state reset complete");
+}
+
+// ============================================================================
+// Hook Interface
+// ============================================================================
 
 export interface UseVoiceRecordingReturn {
   isRecording: boolean;
@@ -34,55 +91,92 @@ export function useVoiceRecording(
 ): UseVoiceRecordingReturn {
   const KEEP_AWAKE_TAG = "voice-recording-session";
 
+  // ============================================================================
+  // State
+  // ============================================================================
+  
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [duration, setDuration] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [nearLimit, setNearLimit] = useState(false);
 
+  // ============================================================================
+  // Refs (for values that shouldn't trigger re-renders)
+  // ============================================================================
+  
   const recordingRef = useRef<Audio.Recording | null>(null);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasShownWarningRef = useRef(false);
+  const isCleaningUpRef = useRef(false); // Prevent concurrent cleanup
+
+  // ============================================================================
+  // Duration Timer
+  // ============================================================================
 
   const startDurationTimer = useCallback(() => {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
     }
+    
     durationIntervalRef.current = setInterval(async () => {
       if (recordingRef.current) {
-        const status = await recordingRef.current.getStatusAsync();
-        if (status.isRecording) {
-          const seconds = Math.floor(status.durationMillis / 1000);
-          setDuration(seconds);
+        try {
+          const status = await recordingRef.current.getStatusAsync();
+          if (status.isRecording) {
+            const seconds = Math.floor(status.durationMillis / 1000);
+            setDuration(seconds);
 
-          if (seconds >= maxDurationSeconds - 60 && !hasShownWarningRef.current) {
-            hasShownWarningRef.current = true;
-            setNearLimit(true);
-          }
+            if (seconds >= maxDurationSeconds - 60 && !hasShownWarningRef.current) {
+              hasShownWarningRef.current = true;
+              setNearLimit(true);
+            }
 
-          if (seconds >= maxDurationSeconds) {
-            stopRecording();
+            if (seconds >= maxDurationSeconds) {
+              stopRecording();
+            }
           }
+        } catch (error) {
+          console.log("Error getting recording status:", error);
         }
       }
     }, 1000);
   }, [maxDurationSeconds]);
 
-  // 清理资源
+  const stopDurationTimer = useCallback(() => {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+  }, []);
+
+  // ============================================================================
+  // Cleanup on unmount
+  // ============================================================================
+
   useEffect(() => {
     return () => {
-      if (recordingRef.current) {
-        recordingRef.current.stopAndUnloadAsync().catch(console.error);
-        if (globalRecordingRef === recordingRef.current) {
-          globalRecordingRef = null;
+      // Component unmounting - clean up everything
+      (async () => {
+        if (recordingRef.current) {
+          await safeCleanupRecording(recordingRef.current);
+          if (globalRecordingInstance === recordingRef.current) {
+            globalRecordingInstance = null;
+          }
         }
-      }
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
+        stopDurationTimer();
+        try {
+          await deactivateKeepAwake(KEEP_AWAKE_TAG);
+        } catch (e) {
+          // Ignore
+        }
+      })();
     };
   }, []);
+
+  // ============================================================================
+  // App state handling (background/foreground)
+  // ============================================================================
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", async (state) => {
@@ -106,120 +200,131 @@ export function useVoiceRecording(
           await activateKeepAwakeAsync(KEEP_AWAKE_TAG);
         }
       } catch (error) {
-        console.log("恢复录音状态失败:", error);
+        console.log("Error restoring recording state:", error);
       }
     });
 
     return () => subscription.remove();
   }, [startDurationTimer]);
 
-  /**
-   * 安全清理录音对象的辅助函数
-   * 统一处理录音对象的清理逻辑，避免代码重复
-   */
-  const cleanupRecordingObject = async (recording: Audio.Recording | null): Promise<void> => {
-    if (!recording) return;
-    
-    try {
-      const status = await recording.getStatusAsync();
-      if (status.isLoaded) {
-        if (status.isRecording) {
-          await recording.stopAndUnloadAsync();
-        } else {
-          await recording.unloadAsync();
-        }
-      }
-    } catch (error) {
-      // 清理失败时忽略错误，确保继续执行
-      console.log("清理录音对象时出错（可忽略）:", error);
-    }
-  };
+  // ============================================================================
+  // Audio Mode Configuration
+  // ============================================================================
 
-  const configureAudioMode = async () => {
+  const configureAudioMode = async (): Promise<void> => {
     try {
-      // ✅ 关键修复：先设置音频模式为录音模式
-      // 使用数字值：1 = DoNotMix (停止其他音频), 2 = DuckOthers (降低其他音频)
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
-        interruptionModeIOS: 1, // ✅ DoNotMix - 停止其他音频，避免冲突
-        interruptionModeAndroid: 1, // ✅ DoNotMix - 停止其他音频，避免冲突
+        interruptionModeIOS: 1, // DoNotMix - stop other audio
+        interruptionModeAndroid: 1,
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
       
-      // ✅ 额外等待一小段时间，确保音频模式切换完成
+      // Give the system time to apply the mode
       await new Promise(resolve => setTimeout(resolve, 100));
     } catch (error) {
       console.error("Failed to configure audio mode:", error);
-      throw error; // ✅ 抛出错误，让调用者知道配置失败
+      throw error;
     }
   };
 
-  const requestPermission = async () => {
-    const { granted } = await Audio.requestPermissionsAsync();
-    if (!granted) {
-      Alert.alert("需要麦克风权限", "请在设置中允许访问麦克风");
+  // ============================================================================
+  // Permission Request
+  // ============================================================================
+
+  const requestPermission = async (): Promise<boolean> => {
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        Alert.alert("需要麦克风权限", "请在设置中允许访问麦克风");
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error("Permission request failed:", error);
       return false;
     }
-    return true;
   };
 
-  const startRecording = async () => {
-    if (isStarting) return;
+  // ============================================================================
+  // START RECORDING
+  // ============================================================================
+
+  const startRecording = async (): Promise<void> => {
+    // Guard: Prevent concurrent start attempts
+    if (isStarting) {
+      console.log("⚠️ Recording start already in progress, ignoring");
+      return;
+    }
+
+    // Guard: Check if already recording
+    if (isRecording) {
+      console.log("⚠️ Already recording, ignoring start request");
+      return;
+    }
+
     setIsStarting(true);
+    console.log("🎤 Starting recording flow...");
 
     try {
+      // Step 1: Check permissions
       const hasPermission = await requestPermission();
       if (!hasPermission) {
-        setIsStarting(false);
-        return;
+        throw new Error("Microphone permission denied");
       }
 
-      // ✅ 关键修复：在创建新录音之前，先清理之前的录音对象
-      // 这可以防止 "Only one Recording object can be prepared at a given time" 错误
+      // Step 2: Clean up any existing recording
+      console.log("🧹 Cleaning up previous recording instances...");
+      
+      // Clean local ref
       if (recordingRef.current) {
-        await cleanupRecordingObject(recordingRef.current);
+        await safeCleanupRecording(recordingRef.current);
         recordingRef.current = null;
-        // ✅ 额外等待，确保录音对象完全释放
+      }
+
+      // Clean global ref
+      if (globalRecordingInstance) {
+        await safeCleanupRecording(globalRecordingInstance);
+        globalRecordingInstance = null;
+      }
+
+      // Wait for native cleanup
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Step 3: Wait for any concurrent preparation to finish
+      let waitCount = 0;
+      while (globalIsPreparingRecording && waitCount < 20) {
+        console.log(`⏳ Waiting for concurrent preparation to finish... (${waitCount + 1}/20)`);
         await new Promise(resolve => setTimeout(resolve, 100));
+        waitCount++;
       }
 
-      // ✅ 全局互斥：防止多个录音实例同时准备
-      // 如果另一个录音正在准备，稍等一会儿再尝试
-      if (globalPreparing) {
-        await new Promise((resolve) => setTimeout(resolve, 120));
-      }
-      globalPreparing = true;
-
-      // ✅ 如果全局已有录音对象（来自其他组件），先清理
-      if (globalRecordingRef && globalRecordingRef !== recordingRef.current) {
-        await cleanupRecordingObject(globalRecordingRef);
-        globalRecordingRef = null;
+      if (globalIsPreparingRecording) {
+        console.warn("⚠️ Concurrent preparation timeout, forcing reset");
+        await forceResetGlobalState();
       }
 
-      // ✅ 清理之前的定时器
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
+      // Step 4: Mark as preparing
+      globalIsPreparingRecording = true;
 
-      // ✅ 关键修复：先配置音频模式（这会停止所有播放），再创建录音对象
-      try {
-        await configureAudioMode();
-      } catch (error) {
-        console.error("配置音频模式失败:", error);
-        // ✅ 即使配置失败，也尝试继续（某些情况下可能仍然可以录音）
-        // 但记录错误以便调试
-      }
-      
-      // ✅ 额外等待，确保所有音频播放器已完全停止
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
+      // Step 5: Stop duration timer
+      stopDurationTimer();
+
+      // Step 6: Configure audio mode
+      console.log("🔧 Configuring audio mode...");
+      await configureAudioMode();
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Step 7: Activate keep awake
       await activateKeepAwakeAsync(KEEP_AWAKE_TAG);
 
-      const { recording } = await Audio.Recording.createAsync({
+      // Step 8: Create recording instance
+      console.log("📱 Creating recording instance...");
+      
+      const recordingOptions: Audio.RecordingOptions = {
         android: {
           extension: ".m4a",
           outputFormat: Audio.AndroidOutputFormat.MPEG_4,
@@ -243,129 +348,177 @@ export function useVoiceRecording(
           mimeType: "audio/webm",
           bitsPerSecond: 128000,
         },
-      });
+      };
 
-      // ✅ 关键修复：验证录音对象是否成功创建且正在录音
-      // 根据 expo-av 文档，createAsync 创建的录音对象应该立即开始录音
-      try {
-        const status = await recording.getStatusAsync();
-        if (!status.isLoaded || !status.isRecording) {
-          console.error("❌ 录音对象创建但未开始录音，状态:", status);
-          await cleanupRecordingObject(recording);
-          throw new Error("录音对象创建失败：状态异常");
+      // Try up to 2 times (not 3, to fail faster)
+      let recording: Audio.Recording | null = null;
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        console.log(`📡 Recording attempt ${attempt}/2...`);
+        
+        const tempRecording = new Audio.Recording();
+        
+        try {
+          await tempRecording.prepareToRecordAsync(recordingOptions);
+          await tempRecording.startAsync();
+          
+          // Verify it's actually recording
+          const status = await tempRecording.getStatusAsync();
+          if (!status.isRecording) {
+            throw new Error("Recording created but not in recording state");
+          }
+          
+          recording = tempRecording;
+          console.log("✅ Recording started successfully");
+          break;
+        } catch (error: any) {
+          lastError = error;
+          console.warn(`⚠️ Attempt ${attempt} failed:`, error.message);
+          
+          // CRITICAL: Clean up the failed instance
+          await safeCleanupRecording(tempRecording);
+          
+          // If this is the "Only one Recording" error and we have attempts left
+          if (error.message?.includes("Only one Recording") && attempt < 2) {
+            console.log("🔄 Attempting aggressive reset...");
+            await forceResetGlobalState();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await configureAudioMode();
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
         }
-        console.log("✅ 录音成功启动，状态正常");
-      } catch (verifyError) {
-        // 如果验证失败，清理录音对象并重新抛出错误
-        console.error("❌ 验证录音状态失败:", verifyError);
-        await cleanupRecordingObject(recording);
-        throw verifyError;
       }
 
+      // If all attempts failed, throw the last error
+      if (!recording) {
+        throw lastError || new Error("Failed to create recording");
+      }
+
+      // Step 9: Save references
       recordingRef.current = recording;
-      globalRecordingRef = recording;
+      globalRecordingInstance = recording;
+
+      // Step 10: Update state
       setIsRecording(true);
       setIsPaused(false);
       setDuration(0);
       setNearLimit(false);
       hasShownWarningRef.current = false;
 
+      // Step 11: Start duration timer
       startDurationTimer();
-    } catch (error) {
-      console.error("❌ Failed to start recording:", error);
-      
-      // ✅ 关键修复：错误发生时，彻底清理所有状态
-      // 这可以防止后续录音尝试时状态不一致导致卡住
-      
-      // 1. 清理录音对象引用（如果存在）
-      // 注意：如果 createAsync 失败，recordingRef.current 应该是 null
-      // 但如果验证失败，recordingRef.current 可能还未设置，所以这里只清理已存在的引用
-      if (recordingRef.current) {
-        await cleanupRecordingObject(recordingRef.current);
-        recordingRef.current = null;
+
+      console.log("✅ Recording flow completed successfully");
+    } catch (error: any) {
+      console.error("❌ Recording start failed:", error);
+
+      // Clean up on error
+      if (globalRecordingInstance) {
+        await safeCleanupRecording(globalRecordingInstance);
+        globalRecordingInstance = null;
       }
-      
-      // 2. 清理全局录音对象引用（如果存在且与当前引用不同）
-      if (globalRecordingRef && globalRecordingRef !== recordingRef.current) {
-        await cleanupRecordingObject(globalRecordingRef);
-        globalRecordingRef = null;
-      }
-      
-      // 3. 清理定时器
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
-      
-      // 4. 重置所有状态
+
       setIsRecording(false);
       setIsPaused(false);
       setDuration(0);
-      setNearLimit(false);
-      hasShownWarningRef.current = false;
-      
-      // 5. 清理 KeepAwake
+
       try {
-        deactivateKeepAwake(KEEP_AWAKE_TAG);
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
       } catch (e) {
-        // 忽略错误
+        // Ignore
       }
-      
-      // 6. 显示错误提示
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("❌ 录音启动失败详情:", errorMessage);
-      Alert.alert("错误", "启动录音失败，请重试");
+
+      // Show user-friendly error
+      const errorMessage = error.message?.includes("Only one Recording")
+        ? "麦克风正被其他应用占用。请关闭其他正在使用麦克风的应用（如微信、电话等），然后重试。"
+        : "无法启动录音。请检查麦克风权限并重试。";
+
+      Alert.alert("录音失败", errorMessage);
     } finally {
-      globalPreparing = false;
+      globalIsPreparingRecording = false;
       setIsStarting(false);
     }
   };
 
-  const pauseRecording = async () => {
-    if (!recordingRef.current || !isRecording || isPaused) return;
+  // ============================================================================
+  // PAUSE RECORDING
+  // ============================================================================
+
+  const pauseRecording = async (): Promise<void> => {
+    if (!recordingRef.current || !isRecording || isPaused) {
+      console.log("⚠️ Cannot pause: invalid state");
+      return;
+    }
+
     try {
       await recordingRef.current.pauseAsync();
       setIsPaused(true);
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
+      stopDurationTimer();
+      console.log("⏸️ Recording paused");
     } catch (error) {
       console.error("Failed to pause recording:", error);
     }
   };
 
-  const resumeRecording = async () => {
-    if (!recordingRef.current || !isRecording || !isPaused) return;
+  // ============================================================================
+  // RESUME RECORDING
+  // ============================================================================
+
+  const resumeRecording = async (): Promise<void> => {
+    if (!recordingRef.current || !isRecording || !isPaused) {
+      console.log("⚠️ Cannot resume: invalid state");
+      return;
+    }
+
     try {
       await configureAudioMode();
       await recordingRef.current.startAsync();
       setIsPaused(false);
-
       startDurationTimer();
+      console.log("▶️ Recording resumed");
     } catch (error) {
       console.error("Failed to resume recording:", error);
     }
   };
 
+  // ============================================================================
+  // STOP RECORDING
+  // ============================================================================
+
   const stopRecording = async (): Promise<string | null> => {
-    if (!recordingRef.current) return null;
+    if (!recordingRef.current) {
+      console.log("⚠️ No recording to stop");
+      return null;
+    }
 
     try {
+      console.log("⏹️ Stopping recording...");
+      
       const uri = recordingRef.current.getURI();
       await recordingRef.current.stopAndUnloadAsync();
-      if (globalRecordingRef === recordingRef.current) {
-        globalRecordingRef = null;
+      
+      // Clean up references
+      if (globalRecordingInstance === recordingRef.current) {
+        globalRecordingInstance = null;
       }
       recordingRef.current = null;
 
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-      }
+      // Stop timer
+      stopDurationTimer();
 
+      // Update state
       setIsRecording(false);
       setIsPaused(false);
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
 
+      // Deactivate keep awake
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (e) {
+        // Ignore
+      }
+
+      console.log("✅ Recording stopped successfully");
       return uri;
     } catch (error) {
       console.error("Failed to stop recording:", error);
@@ -373,24 +526,64 @@ export function useVoiceRecording(
     }
   };
 
-  const cancelRecording = async () => {
-    if (recordingRef.current) {
-      try {
-        await recordingRef.current.stopAndUnloadAsync();
-      } catch (e) {}
-      if (globalRecordingRef === recordingRef.current) {
-        globalRecordingRef = null;
+  // ============================================================================
+  // CANCEL RECORDING
+  // ============================================================================
+
+  const cancelRecording = async (): Promise<void> => {
+    // Prevent concurrent cleanup
+    if (isCleaningUpRef.current) {
+      console.log("⚠️ Cleanup already in progress");
+      return;
+    }
+
+    isCleaningUpRef.current = true;
+    console.log("🧹 Canceling recording...");
+
+    try {
+      // Clean up recording
+      if (recordingRef.current) {
+        await safeCleanupRecording(recordingRef.current);
+        if (globalRecordingInstance === recordingRef.current) {
+          globalRecordingInstance = null;
+        }
+        recordingRef.current = null;
+      } else if (globalRecordingInstance) {
+        await safeCleanupRecording(globalRecordingInstance);
+        globalRecordingInstance = null;
       }
-      recordingRef.current = null;
+
+      // Reset global flag
+      globalIsPreparingRecording = false;
+
+      // Stop timer
+      stopDurationTimer();
+
+      // Reset state
+      setIsRecording(false);
+      setIsPaused(false);
+      setDuration(0);
+      setIsStarting(false);
+      hasShownWarningRef.current = false;
+
+      // Deactivate keep awake
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch (e) {
+        // Ignore
+      }
+
+      console.log("✅ Recording canceled successfully");
+    } catch (error) {
+      console.error("Error during cancel:", error);
+    } finally {
+      isCleaningUpRef.current = false;
     }
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-    }
-    setIsRecording(false);
-    setIsPaused(false);
-    setDuration(0);
-    deactivateKeepAwake(KEEP_AWAKE_TAG);
   };
+
+  // ============================================================================
+  // Return
+  // ============================================================================
 
   return {
     isRecording,

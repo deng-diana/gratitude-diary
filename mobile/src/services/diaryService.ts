@@ -1420,25 +1420,27 @@ async function parseSSEStream(
     console.log("✅ 语音日记创建成功（流式）:", diary.diary_id);
     return diary;
   } finally {
-    reader.releaseLock();
+        reader.releaseLock();
   }
 }
 
 /**
- * 更新日记内容和/或标题
+ * 更新日记
  *
  * @param diaryId - 日记ID
  * @param content - 新的日记内容（可选）
  * @param title - 新的标题（可选）
+ * @param imageUrls - 新的图片URL列表（可选）
  */
 export async function updateDiary(
   diaryId: string,
   content?: string,
-  title?: string
+  title?: string,
+  imageUrls?: string[]
 ): Promise<Diary> {
   console.log("✏️ 更新日记", diaryId);
 
-  const body: { content?: string; title?: string } = {};
+  const body: { content?: string; title?: string; image_urls?: string[] } = {};
   if (content !== undefined) {
     body.content = content;
     console.log("📝 更新内容:", content);
@@ -1446,6 +1448,10 @@ export async function updateDiary(
   if (title !== undefined) {
     body.title = title;
     console.log("📝 更新标题:", title);
+  }
+  if (imageUrls !== undefined) {
+    body.image_urls = imageUrls;
+    console.log("📝 更新图片数量:", imageUrls.length);
   }
 
   try {

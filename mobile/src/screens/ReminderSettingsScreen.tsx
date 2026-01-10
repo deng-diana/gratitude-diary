@@ -55,15 +55,43 @@ export default function ReminderSettingsScreen() {
   }, []);
 
   const updateSettings = async (next: DailyReminderSettings) => {
-    setSettings(next);
-    await applyReminderSettings(next);
+    try {
+      // ✅ 先更新 UI 状态，提供即时反馈
+      setSettings(next);
+      await applyReminderSettings(next);
+      console.log("✅ 提醒设置更新成功");
+    } catch (error: any) {
+      // ✅ 如果设置失败，回滚 UI 状态
+      console.error("❌ 更新提醒设置失败:", error);
+      const currentSettings = await getReminderSettings();
+      setSettings(currentSettings);
+      
+      // ✅ 如果是因为权限问题，显示提示
+      if (error.message === "NOTIFICATION_PERMISSION_DENIED") {
+        Alert.alert(
+          t("reminder.permissionTitle"),
+          t("reminder.permissionMessage"),
+          [
+            { text: t("common.cancel"), style: "cancel" },
+            {
+              text: t("reminder.openSettings"),
+              onPress: () => {
+                Linking.openSettings().catch(() => {});
+              },
+            },
+          ]
+        );
+      }
+    }
   };
 
   const handleToggle = async (value: boolean) => {
     if (!settings) return;
     if (value) {
+      // ✅ 在启用前请求权限
       const granted = await requestNotificationPermission();
       if (!granted) {
+        // ✅ 权限被拒绝，不更新 UI（开关保持关闭状态）
         Alert.alert(
           t("reminder.permissionTitle"),
           t("reminder.permissionMessage"),
@@ -80,6 +108,7 @@ export default function ReminderSettingsScreen() {
         return;
       }
     }
+    // ✅ 权限检查通过，更新设置
     await updateSettings({ ...settings, enabled: value });
   };
 
@@ -142,7 +171,7 @@ export default function ReminderSettingsScreen() {
           accessibilityHint={t("accessibility.button.closeHint")}
           accessibilityRole="button"
         >
-          <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
+          <Ionicons name="chevron-back-outline" size={24} color="#1A1A1A" />
         </TouchableOpacity>
         <Text style={[styles.title, typography.diaryTitle]}>
           {t("reminder.title")}
@@ -272,7 +301,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 4, // ✅ 缩小箭头与标题之间的间距
   },
   backButton: {
     width: 36,
